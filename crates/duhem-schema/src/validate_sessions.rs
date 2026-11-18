@@ -13,7 +13,10 @@ pub(crate) fn validate(
     // Validate authored selectors even if a flow has no browser actions.
     // A second pass over expanded actions checks inherited coverage.
     let mut expanded = v.clone();
-    let expanded_ok = crate::flows::validate_and_expand(&mut expanded).is_ok();
+    let expanded_ok = crate::flows::expand(&mut expanded).is_ok();
+    if expanded_ok {
+        errors.extend(crate::groups::validate_expanded_depth(&expanded));
+    }
     for (ci, criterion) in v.criteria.iter().enumerate() {
         for (ki, check) in criterion.checks.iter().enumerate() {
             let path = check_path(ci, ki, "sessions");

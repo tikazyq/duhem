@@ -20,17 +20,27 @@ pub(crate) const MAX_FLOW_DEPTH: usize = MAX_INCLUDE_DEPTH;
 
 /// Validate every flow-facing rule and expand all check invocations.
 pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Result<(), String> {
-    let groups = crate::groups::validate(definition);
-    if !groups.is_empty() {
-        return Err(groups
-            .iter()
-            .map(|error| match error.location() {
-                Some(location) => format!("{}:{}: {error}", location.line, location.column),
-                None => error.to_string(),
-            })
-            .collect::<Vec<_>>()
-            .join("; "));
+    report_group_errors(crate::groups::validate(definition))?;
+    expand(definition)?;
+    report_group_errors(crate::groups::validate_expanded_depth(definition))
+}
+
+fn report_group_errors(errors: Vec<crate::ValidationError>) -> Result<(), String> {
+    if errors.is_empty() {
+        return Ok(());
     }
+    Err(errors
+        .iter()
+        .map(|error| match error.location() {
+            Some(location) => format!("{}:{}: {error}", location.line, location.column),
+            None => error.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("; "))
+}
+
+/// Expand a definition after the caller has validated authored groups.
+pub(crate) fn expand(definition: &mut VerificationDefinition) -> Result<(), String> {
     crate::groups::flatten(definition);
     let errors = validate_authored(definition);
     if !errors.is_empty() {

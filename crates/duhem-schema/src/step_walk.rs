@@ -11,6 +11,7 @@ pub struct StepBlock<'a> {
     pub check: Option<&'a Check>,
     pub(crate) path: Vec<Segment>,
     pub(crate) group_body: bool,
+    pub(crate) nested: bool,
 }
 
 impl StepBlock<'_> {
@@ -62,6 +63,7 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
             vec![Segment::key(phase)],
             None,
             false,
+            false,
             &mut blocks,
         );
     }
@@ -76,6 +78,7 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
                     Segment::key(phase),
                 ],
                 None,
+                false,
                 false,
                 &mut blocks,
             );
@@ -96,6 +99,7 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
                 ],
                 None,
                 false,
+                false,
                 &mut blocks,
             );
         }
@@ -114,6 +118,7 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
                 format!("{label} {phase}"),
                 path,
                 None,
+                false,
                 false,
                 &mut blocks,
             );
@@ -137,7 +142,15 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
                 } else {
                     format!("{label} {phase}")
                 };
-                collect(steps, site, path, body.then_some(check), false, &mut blocks);
+                collect(
+                    steps,
+                    site,
+                    path,
+                    body.then_some(check),
+                    false,
+                    false,
+                    &mut blocks,
+                );
             }
         }
     }
@@ -150,6 +163,7 @@ fn collect<'a>(
     path: Vec<Segment>,
     check: Option<&'a Check>,
     group_body: bool,
+    nested: bool,
     blocks: &mut Vec<StepBlock<'a>>,
 ) {
     for (index, step) in steps.iter().enumerate() {
@@ -167,6 +181,7 @@ fn collect<'a>(
                 nested_path,
                 check,
                 step.for_each.is_none(),
+                true,
                 blocks,
             );
         }
@@ -177,6 +192,7 @@ fn collect<'a>(
         check,
         path,
         group_body,
+        nested,
     });
 }
 

@@ -58,6 +58,43 @@ pub(crate) fn validate(v: &VerificationDefinition) -> Vec<ValidationError> {
     errors
 }
 
+/// Individually valid groups can become too deep when their flow calls
+/// are expanded. Loop bodies and registered cleanups have their own sequence.
+pub(crate) fn validate_expanded_depth(v: &VerificationDefinition) -> Vec<ValidationError> {
+    fn check(steps: &[Step], enclosing: usize) -> Option<ValidationError> {
+        for step in steps {
+            let mut depth = enclosing;
+            for group in step.groups.iter().filter(|group| !group.label.is_empty()) {
+                depth += 1;
+                if depth > crate::flows::MAX_FLOW_DEPTH {
+                    return Some(ValidationError::InvalidGroup {
+                        message: format!(
+                            "group `{}` exceeds group depth {} after flow expansion",
+                            group.label,
+                            crate::flows::MAX_FLOW_DEPTH
+                        ),
+                        location: group.location,
+                    });
+                }
+            }
+            if let Some(error) = check(&step.for_each_body, depth) {
+                return Some(error);
+            }
+            for cleanup in &step.flow_cleanup {
+                if let Some(error) = check(&cleanup.steps, 0) {
+                    return Some(error);
+                }
+            }
+        }
+        None
+    }
+    crate::step_walk::step_blocks(v)
+        .into_iter()
+        .filter(|block| !block.nested)
+        .filter_map(|block| check(block.steps, 0))
+        .collect()
+}
+
 #[derive(Default)]
 struct Scope<'a> {
     labels: BTreeSet<&'a str>,
@@ -553,6 +590,40 @@ criteria:
         let body = &check.steps[0].for_each_body;
         assert_eq!(body[0].session.as_deref(), Some("primary"));
         assert_eq!(body[1].session.as_deref(), Some("secondary"));
+    }
+
+    #[test]
+    fn flow_calls_cannot_exceed_the_group_depth_limit() {
+        let yaml = r#"
+verification: groups across calls
+flows:
+  prepare:
+    steps:
+      - id: first
+        steps:
+          - id: second
+            steps: [{ uses: cli/invoke }]
+setup:
+  - id: setup_group
+    steps:
+      - id: inner
+        steps: [{ call: prepare }]
+criteria:
+  - id: AC-1
+    description: A claim
+    checks:
+      - id: AC-1.1
+        assertions: ["true"]
+"#;
+        let mut authored = VerificationDefinition::from_yaml_str(yaml).unwrap();
+        assert!(crate::validate(&authored).unwrap_err().iter().any(|error| {
+            error.to_string().contains("after flow expansion") && error.location().is_some()
+        }));
+        assert!(
+            crate::flows::validate_and_expand(&mut authored)
+                .unwrap_err()
+                .contains("after flow expansion")
+        );
     }
 
     #[test]
