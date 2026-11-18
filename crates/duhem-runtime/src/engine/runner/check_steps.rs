@@ -40,7 +40,8 @@ impl Engine {
             // context available without bifurcating evidence.
             let mut resolved_with = step.with.clone();
             let catalog_reference = page_reference(&step.with);
-            let step_error = if condition_error.is_some() {
+            let condition_failed = condition_error.is_some();
+            let step_error = if condition_failed {
                 condition_error
             } else if gate.is_none() {
                 substitute_with(&mut resolved_with, ctx).err().map(|u| {
@@ -134,7 +135,8 @@ impl Engine {
                 operands,
             }) = gate
             {
-                if condition.is_some()
+                let value_gated = condition.is_some();
+                if value_gated
                     && self
                         .registry
                         .get(step.uses_name())
@@ -154,6 +156,7 @@ impl Engine {
                     })
                     .await?;
                 step_evidence[idx] = StepEvidence::skipped(reason);
+                step_evidence[idx].value_gated = value_gated;
                 continue;
             }
 
@@ -167,10 +170,12 @@ impl Engine {
                     .append(EventPayload::StepFinished {
                         step_index: idx as u32,
                         outcome: duhem_evidence::StepOutcome::Error,
-                        detail: Some(detail),
+                        detail: Some(detail.clone()),
                     })
                     .await?;
-                if !cleanup_step && stored_error.is_none() {
+                step_evidence[idx].outcome = Some(Outcome::Error);
+                step_evidence[idx].detail = Some(detail);
+                if !condition_failed && !cleanup_step && stored_error.is_none() {
                     *stored_error = Some(error);
                 }
                 if failed_by.is_none() {
@@ -263,6 +268,7 @@ impl Engine {
                         with: resolved_with.clone(),
                         outputs: r.outputs.clone(),
                         skip_reason: None,
+                        value_gated: false,
                         catalog_reference: catalog_reference.clone(),
                         outcome: Some(r.outcome.clone()),
                         detail: None,

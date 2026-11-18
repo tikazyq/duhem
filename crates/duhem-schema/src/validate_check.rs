@@ -18,18 +18,20 @@ pub(super) fn validate_check(
         setup_outputs,
         outputs_for,
     } = *definition;
-    let check_steps: Vec<(&Step, Option<&str>)> = ch
+    let check_steps: Vec<(&Step, Option<&str>, usize, Option<usize>)> = ch
         .steps
         .iter()
-        .flat_map(|s| {
-            std::iter::once((s, None)).chain(
+        .enumerate()
+        .flat_map(|(outer, s)| {
+            std::iter::once((s, None, outer, None)).chain(
                 (if s.for_each_body.is_empty() {
                     s.steps.as_deref().unwrap_or(&[])
                 } else {
                     &s.for_each_body
                 })
                 .iter()
-                .map(move |body| (body, s.as_binding.as_deref())),
+                .enumerate()
+                .map(move |(inner, body)| (body, s.as_binding.as_deref(), outer, Some(inner))),
             )
         })
         .collect();
@@ -57,29 +59,7 @@ pub(super) fn validate_check(
     let mut step_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
-    for (idx, &(s, _)) in check_steps.iter().enumerate() {
-        if matches!(s.condition, StepCondition::Expr(_)) {
-            let path = [
-                SourcePathSegment::key("criteria"),
-                SourcePathSegment::index(criterion_index),
-                SourcePathSegment::key("checks"),
-                SourcePathSegment::index(check_index),
-                SourcePathSegment::key("steps"),
-                SourcePathSegment::index(idx),
-                SourcePathSegment::key("if"),
-            ];
-            let raw = match &s.condition {
-                StepCondition::Expr(e) => e.raw.as_str(),
-                _ => unreachable!(),
-            };
-            errs.push(ValidationError::CheckStepConditionUnavailable {
-                criterion: c.id.clone(),
-                check: ch.id.clone(),
-                location: source_context_matches
-                    .then(|| source_map.scalar_location(&path, raw))
-                    .flatten(),
-            });
-        }
+    for &(s, _, _, _) in &check_steps {
         if let Some(id) = &s.id {
             if !seen_step_ids.insert(id.as_str()) {
                 errs.push(ValidationError::DuplicateStepId {
@@ -268,7 +248,53 @@ pub(super) fn validate_check(
     // the action as a literal `$...` string (#134). Walk every string
     // scalar in the (untyped) `with:` tree and resolve its references
     // against the same scope.
-    for (idx, &(s, active_loop)) in check_steps.iter().enumerate() {
+    let mut preceding_outputs = HashMap::new();
+    for (idx, &(s, active_loop, outer, inner)) in check_steps.iter().enumerate() {
+        if let StepCondition::Expr(expr) = &s.condition {
+            let mut path = crate::source::check_path(criterion_index, check_index, "steps");
+            path.push(SourcePathSegment::index(outer));
+            if let Some(inner) = inner {
+                path.push(SourcePathSegment::key("steps"));
+                path.push(SourcePathSegment::index(inner));
+            }
+            path.push(SourcePathSegment::key("if"));
+            let location = source_context_matches
+                .then(|| {
+                    if inner.is_some() {
+                        source_map.scalar_location(&path, &expr.raw)
+                    } else {
+                        source_map.step_condition_location(
+                            criterion_index,
+                            check_index,
+                            outer,
+                            &path,
+                            &expr.raw,
+                        )
+                    }
+                })
+                .flatten();
+            let condition_scope = PathScope {
+                step_outputs: &preceding_outputs,
+                active_loop,
+                ..scope
+            };
+            walk_checkable_paths(&expr.parsed, &mut |p, arity| {
+                check_path(
+                    &condition_scope,
+                    p,
+                    arity,
+                    &expr.raw,
+                    &RefSite::StepCondition {
+                        step: step_label(s, idx),
+                    },
+                    location,
+                    errs,
+                );
+            });
+        }
+        if let Some(id) = s.id.as_deref() {
+            preceding_outputs.insert(id, step_outputs[id].clone());
+        }
         if let Some(expr) = &s.for_each {
             walk_checkable_paths(&expr.parsed, &mut |p, arity| {
                 check_path(

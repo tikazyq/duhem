@@ -134,6 +134,11 @@ jobs:
             --db .duhem/duhem.db \
             --inputs duhem_bin="$PWD/target/release/duhem"
 
+      - name: Run value-based check conditions against real SQLite observations
+        run: |
+          ./target/release/duhem run verifications/check-conditions-example \
+            --db .duhem/duhem.db
+
       - name: Run owned-process example against a real local HTTP service
         run: |
           ./target/release/duhem run verifications/owned-process-example \

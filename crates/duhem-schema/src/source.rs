@@ -60,6 +60,7 @@ pub(crate) enum StepSourceOrigin {
 pub struct SourceMap {
     nodes: BTreeMap<Vec<SourcePathSegment>, SourceNode>,
     expanded_step_origins: BTreeMap<(usize, usize, usize), StepSourceOrigin>,
+    expanded_condition_locations: BTreeMap<(usize, usize, usize), SourceLocation>,
 }
 
 // Source provenance is not part of a Verification Definition's semantic
@@ -148,6 +149,33 @@ impl SourceMap {
         let check = check_path(criterion_index, check_index, "id");
         self.scalar_location(&criterion, criterion_id).is_some()
             && self.scalar_location(&check, check_id).is_some()
+    }
+
+    pub(crate) fn record_condition_location(
+        &mut self,
+        criterion: usize,
+        check: usize,
+        step: usize,
+        authored_path: &[SourcePathSegment],
+    ) {
+        if let Some(location) = self.node_location(authored_path) {
+            self.expanded_condition_locations
+                .insert((criterion, check, step), location);
+        }
+    }
+
+    pub(crate) fn step_condition_location(
+        &self,
+        criterion: usize,
+        check: usize,
+        step: usize,
+        path: &[SourcePathSegment],
+        raw: &str,
+    ) -> Option<SourceLocation> {
+        self.expanded_condition_locations
+            .get(&(criterion, check, step))
+            .copied()
+            .or_else(|| self.scalar_location(path, raw))
     }
 
     pub(crate) fn record_expanded_step_origins(

@@ -109,6 +109,8 @@ pub(crate) struct StepEvidence {
     /// assertion verdict; this distinguishes it from an unrun step
     /// whose observation is genuinely missing.
     pub skip_reason: Option<String>,
+    /// A false value condition cannot suppress explicit output assertions.
+    pub value_gated: bool,
     /// Authored catalog coordinate, retained after the map is spliced
     /// so a failure points back to the one shared entry to edit.
     pub catalog_reference: Option<String>,
@@ -129,6 +131,7 @@ impl StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             skip_reason: None,
+            value_gated: false,
             catalog_reference: None,
             outcome: None,
             detail: None,
@@ -140,6 +143,7 @@ impl StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             skip_reason: Some(reason),
+            value_gated: false,
             catalog_reference: None,
             outcome: None,
             detail: None,
@@ -457,6 +461,13 @@ pub(crate) async fn evaluate_explicit_assertions(
                     "check_browser_failed".to_string()
                 }),
             )
+        } else if let Some(step) = value_gated_reference(&expr, check, step_evidence) {
+            (
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                Some(format!(
+                    "missing observation from value-gated step `{step}`"
+                )),
+            )
         } else {
             let (r, values, comparison) = crate::eval::operands::evaluate_assertion(&expr, ctx);
             operands = values;
@@ -552,6 +563,19 @@ fn steps_referenced(expr: &Expr, out: &mut BTreeSet<String>) {
     }
 }
 
+fn value_gated_reference(
+    expr: &Expr,
+    check: &duhem_schema::Check,
+    evidence: &[StepEvidence],
+) -> Option<String> {
+    let mut refs = BTreeSet::new();
+    steps_referenced(expr, &mut refs);
+    check.steps.iter().enumerate().find_map(|(index, step)| {
+        let id = step.id.as_ref()?;
+        (refs.contains(id) && evidence.get(index)?.value_gated).then(|| id.clone())
+    })
+}
+
 fn skipped_reference_reason(
     expr: &Expr,
     check: &duhem_schema::Check,
@@ -559,6 +583,9 @@ fn skipped_reference_reason(
 ) -> Option<String> {
     let mut refs = BTreeSet::new();
     steps_referenced(expr, &mut refs);
+    if value_gated_reference(expr, check, evidence).is_some() {
+        return None;
+    }
     check.steps.iter().enumerate().find_map(|(index, step)| {
         let id = step.id.as_ref()?;
         if !refs.contains(id) {
@@ -765,6 +792,7 @@ mod fail_detail_tests {
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect(),
             skip_reason: None,
+            value_gated: false,
             catalog_reference: None,
             outcome: Some(Outcome::Ok),
             detail: None,
@@ -972,6 +1000,7 @@ mod step_label_tests {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::from([("satisfied".to_string(), serde_json::json!(false))]),
             skip_reason: None,
+            value_gated: false,
             catalog_reference: None,
             outcome: Some(Outcome::Ok),
             detail: None,

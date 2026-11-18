@@ -46,6 +46,17 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
                 &mut counter,
                 &mut expanded.projections,
             );
+            for (index, authored_index) in expanded.condition_origins.iter().enumerate() {
+                let mut path = crate::source::check_path(criterion_index, check_index, "steps");
+                path.push(crate::source::SourcePathSegment::index(*authored_index));
+                path.push(crate::source::SourcePathSegment::key("if"));
+                definition.source_map.record_condition_location(
+                    criterion_index,
+                    check_index,
+                    index,
+                    &path,
+                );
+            }
             check.steps = expanded.steps;
             rewrite_steps(&mut check.steps, &expanded.projections);
             for assertion in &mut check.assertions {
@@ -292,6 +303,7 @@ fn expand_for_each_in_list(steps: &mut [Step], catalog: &FlowCatalog, counter: &
 struct Expansion {
     steps: Vec<Step>,
     origins: Vec<StepSourceOrigin>,
+    condition_origins: Vec<usize>,
     projections: BTreeMap<String, String>,
 }
 
@@ -336,6 +348,7 @@ fn expand_sequence(
             }
             step.flow_secrets = inherited_secrets.to_vec();
             result.steps.push(step);
+            result.condition_origins.push(inner_index);
             result.origins.push(match current_flow {
                 Some(name) => StepSourceOrigin::FlowDefinition {
                     name: name.to_string(),
@@ -426,6 +439,9 @@ fn expand_sequence(
                     .insert(format!("${external_root}.{id}.outputs.{output}"), projected);
             }
         }
+        result
+            .condition_origins
+            .extend(std::iter::repeat_n(inner_index, expanded.steps.len()));
         result.steps.append(&mut expanded.steps);
         result.origins.append(&mut expanded.origins);
     }
@@ -589,6 +605,10 @@ fn render_expr_value(value: &serde_yml::Value) -> Option<String> {
 fn rewrite_steps(steps: &mut [Step], projections: &BTreeMap<String, String>) {
     for step in steps {
         rewrite_value(&mut step.with, projections);
+        if let StepCondition::Expr(condition) = &mut step.condition {
+            *condition = crate::ExprStr::from_source(&rewrite_string(&condition.raw, projections))
+                .expect("rewriting a valid condition preserves expression syntax");
+        }
         if let Some(source) = &mut step.for_each {
             *source = crate::ExprStr::from_source(&rewrite_string(&source.raw, projections))
                 .expect("rewriting a valid step reference preserves expression syntax");

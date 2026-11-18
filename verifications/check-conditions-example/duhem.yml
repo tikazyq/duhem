@@ -1,0 +1,36 @@
+# Duhem self-verification: real SQLite observations drive conditional actions.
+verification: check-conditions-example
+spec_ref: https://github.com/onsager-ai/duhem/issues/663
+
+flows:
+  observe_row:
+    steps:
+      - id: row
+        uses: db/query
+        with: {connection: 'sqlite::memory:', sql: 'select 1 as enabled'}
+    outputs:
+      enabled: $steps.row.outputs.rows[0].enabled
+
+criteria:
+  - id: AC-1
+    description: |
+      Conditional verification exercises applicable claims and exposes
+      excluded judging steps without hiding missing observations.
+    checks:
+      - id: AC-1.1
+        description: A real query's projected result selects applicable judgments
+        steps:
+          - id: observed
+            call: observe_row
+          - id: enabled
+            uses: db/query
+            if: $steps.observed.outputs.enabled == 1
+            with: {connection: 'sqlite::memory:', sql: 'select 2'}
+          - uses: db/observe
+            if: $steps.observed.outputs.enabled == 0
+            with:
+              connection: 'sqlite::memory:'
+              sql: 'select 1'
+              until: {row_count: 1}
+        assertions:
+          - $steps.enabled.outputs.row_count == 1

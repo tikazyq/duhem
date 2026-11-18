@@ -56,6 +56,25 @@ pub fn validate_with_contract_outputs(
             .map(|message| ValidationError::InvalidFlow { message }),
     );
 
+    // References in check conditions are checked against the executable,
+    // flow-expanded sequence, including private ids and output projections.
+    let mut expanded;
+    let v = if v.criteria.iter().flat_map(|c| &c.checks).any(|ch| {
+        ch.steps.iter().any(|step| {
+            (step.call.is_some() && step.for_each.is_none())
+                || (step.for_each.is_some() && step.for_each_body.is_empty())
+        })
+    }) {
+        expanded = v.clone();
+        if crate::flows::validate_and_expand(&mut expanded).is_ok() {
+            &expanded
+        } else {
+            v
+        }
+    } else {
+        v
+    };
+
     crate::validate_for_each::validate_for_each(v, outputs_for, &mut errs);
 
     // §7.7: the `capture/` output-name prefix is reserved for
@@ -3020,21 +3039,122 @@ criteria:
     }
 
     #[test]
-    fn check_step_value_condition_is_rejected_with_a_location() {
+    fn check_step_value_condition_is_available() {
         let v = parse(
             "verification: x\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        steps:\n          - uses: cli/invoke\n            if: $inputs.run == true\n        assertions: [\"true\"]\ninputs:\n  run: { type: boolean }\n",
         );
-        let errs = validate(&v).unwrap_err();
-        assert!(
-            errs.iter().any(|e| matches!(
-                e,
-                ValidationError::CheckStepConditionUnavailable {
-                    location: Some(_),
-                    ..
-                }
-            ) && e.to_string().contains("not yet available on check steps")),
-            "{errs:?}"
+        validate(&v).expect("check value condition");
+    }
+
+    #[test]
+    fn check_conditions_reject_invalid_references_with_locations() {
+        for reference in [
+            "$steps.later.outputs.status", // forward
+            "$steps.gated.outputs.status", // self
+            "$steps.unknown.outputs.status",
+            "$steps.earlier.outputs.unknown",
+            "$steps.earlier.status", // malformed
+            "$inputs.unknown",
+            "$setup.unknown.outputs.status",
+            "$fixture.unknown.service.outputs.handle",
+            "$item", // no enclosing loop binding
+        ] {
+            let v = parse(&format!(
+                r#"
+verification: conditions
+criteria:
+  - id: AC-1
+    description: References must resolve before execution
+    checks:
+      - id: C
+        steps:
+          - id: earlier
+            uses: api/call
+          - id: gated
+            uses: api/call
+            if: {reference} == 200
+          - id: later
+            uses: api/call
+        assertions: ["true"]
+"#
+            ));
+            let errors = validate_with_contract_outputs(&v, &api_call_outputs).unwrap_err();
+            assert!(
+                errors
+                    .iter()
+                    .any(|error| error.location().is_some() && error.to_string().contains("if:")),
+                "{reference}: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn check_conditions_accept_earlier_contract_outputs_inputs_and_setup() {
+        let v = parse(
+            r#"
+verification: conditions
+inputs:
+  enabled: {type: boolean}
+setup:
+  - id: seed
+    uses: api/call
+criteria:
+  - id: AC-1
+    description: Reuse observations in a condition
+    checks:
+      - id: C
+        steps:
+          - id: earlier
+            uses: api/call
+          - uses: api/call
+            if: $inputs.enabled && $steps.earlier.outputs.status == $setup.seed.outputs.status
+        assertions: ["true"]
+"#,
         );
+        validate_with_contract_outputs(&v, &api_call_outputs).unwrap();
+    }
+
+    #[test]
+    fn flow_call_conditions_validate_after_projection_with_authored_locations() {
+        for reference in ["$steps.first.outputs.status", "$steps.later.outputs.status"] {
+            let v = parse(&format!(
+                r#"
+verification: conditions
+flows:
+  request:
+    steps:
+      - id: inner
+        uses: api/call
+    outputs:
+      status: $steps.inner.outputs.status
+criteria:
+  - id: AC-1
+    description: Flow call conditions use caller scope
+    checks:
+      - id: C
+        steps:
+          - id: first
+            call: request
+          - call: request
+            if: {reference} == 200
+          - id: later
+            call: request
+        assertions: ["true"]
+"#
+            ));
+            let result = validate_with_contract_outputs(&v, &api_call_outputs);
+            if reference.contains("first") {
+                result.unwrap();
+            } else {
+                let errors = result.unwrap_err();
+                assert!(
+                    errors
+                        .iter()
+                        .any(|e| e.location().is_some() && e.to_string().contains("if:")),
+                    "{errors:?}"
+                );
+            }
+        }
     }
 
     #[test]

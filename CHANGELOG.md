@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Check steps accept value-based conditions over earlier observations; gated judging steps remain visible, gated-output assertions and unresolvable conditions are inconclusive, and flow call conditions apply to every expanded step. (#663)
+
 ## v0.7.1 — 2026-11-05
 
 - [additive] Owned process actions record readiness, bounded logs, stop/restart and required cleanup for long-lived local binaries; process outputs from criterion/check setup and consumed fixtures are addressable from the check; non-process visibility unchanged. (#579)

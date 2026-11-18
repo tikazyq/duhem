@@ -14,6 +14,7 @@ fn evidence(outcome: Outcome, with: &str) -> StepEvidence {
         with: serde_yml::from_str(with).unwrap(),
         outputs: BTreeMap::new(),
         skip_reason: None,
+        value_gated: false,
         catalog_reference: None,
         outcome: Some(outcome),
         detail: None,

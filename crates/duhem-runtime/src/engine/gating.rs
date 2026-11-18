@@ -27,9 +27,8 @@ pub(crate) fn step_failed(outcome: &Outcome, judgment: Option<VerdictState>) -> 
 }
 
 /// Apply the outcome gate first, then observe the value condition once.
-/// Check-step expression authoring remains blocked by schema validation
-/// until Tier 2; both runners use this evidence path so that boundary can
-/// open without making conditional absence invisible.
+/// Both runners retain the authored condition and observed operands when
+/// a value gate excludes a step.
 pub(super) fn evaluate(
     step: &duhem_schema::Step,
     index: usize,

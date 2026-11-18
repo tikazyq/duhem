@@ -66,17 +66,115 @@ impl Engine {
             offset = range.end;
             // Resolve once in the outer context. Bounds are enforced before
             // dispatch, so excess rows are never silently truncated.
-            let gate = evaluate_gate(step, range.start, failed_by.as_deref(), ctx)?;
-            if gate.is_some() {
-                for idx in range {
-                    evidence[idx] = StepEvidence::skipped("loop gate".into());
-                    if self
-                        .registry
-                        .get(check.steps[idx].uses_name())
-                        .is_some_and(|d| d.judges())
+            let gate = match evaluate_gate(step, range.start, failed_by.as_deref(), ctx) {
+                Ok(gate) => gate,
+                Err(error) => {
+                    let detail = writer.mask_text(&error.to_string());
+                    let state = VerdictState::Inconclusive(
+                        duhem_judge::InconclusiveCause::MissingObservation,
+                    );
+                    writer
+                        .append(EventPayload::StepStarted {
+                            criterion_id: criterion_id.to_string(),
+                            check_id: check.id.clone(),
+                            step_index: control_index as u32,
+                            uses: "for_each".into(),
+                            layer: None,
+                            with: with_to_evidence_map(&step.with),
+                            flow: crate::engine::flow::origin(step),
+                        })
+                        .await?;
+                    writer
+                        .append(EventPayload::StepFinished {
+                            step_index: control_index as u32,
+                            outcome: duhem_evidence::StepOutcome::Error,
+                            detail: Some(detail.clone()),
+                        })
+                        .await?;
+                    writer
+                        .append(EventPayload::AssertionEvaluated {
+                            operands: None,
+                            check_id: check.id.clone(),
+                            assertion_index: control_index as u32,
+                            iteration: None,
+                            state,
+                            detail: Some(detail.clone()),
+                            expr: Some("for_each condition resolves".into()),
+                            step_index: Some(control_index as u32),
+                        })
+                        .await?;
+                    outcomes.push(AssertionOutcome {
+                        assertion_index: control_index,
+                        iteration: None,
+                        state,
+                        detail: Some(detail.clone()),
+                    });
+                    failed.push(FailedAssertion {
+                        expr: "for_each condition resolves".into(),
+                        state,
+                        detail: Some(detail),
+                    });
+                    failed_by = Some(display_step_label(step, wrapper_index));
+                    continue;
+                }
+            };
+            if let Some(duhem_evidence::StepOutcome::Skipped {
+                reason,
+                condition,
+                operands,
+            }) = gate
+            {
+                for idx in range.clone() {
+                    writer
+                        .append(EventPayload::StepStarted {
+                            criterion_id: criterion_id.to_string(),
+                            check_id: check.id.clone(),
+                            step_index: idx as u32,
+                            uses: check.steps[idx].uses_name().to_string(),
+                            layer: duhem_actions::layer_for_uses(check.steps[idx].uses_name())
+                                .map(str::to_string),
+                            with: with_to_evidence_map(&check.steps[idx].with),
+                            flow: crate::engine::flow::origin(&check.steps[idx]),
+                        })
+                        .await?;
+                    writer
+                        .append(EventPayload::StepFinished {
+                            step_index: idx as u32,
+                            outcome: duhem_evidence::StepOutcome::Skipped {
+                                reason: reason.clone(),
+                                condition: condition.clone(),
+                                operands: operands.clone(),
+                            },
+                            detail: None,
+                        })
+                        .await?;
+                    evidence[idx] = StepEvidence::skipped(reason.clone());
+                    evidence[idx].value_gated = condition.is_some();
+                    if condition.is_some()
+                        && self
+                            .registry
+                            .get(check.steps[idx].uses_name())
+                            .is_some_and(|d| d.judges())
                     {
                         gated += 1;
                     }
+                }
+                if condition.is_some() {
+                    self.judge_iteration(
+                        writer,
+                        &check,
+                        ctx,
+                        &evidence,
+                        &cleanup,
+                        None,
+                        range.collect(),
+                        true,
+                        environment_failed,
+                        browser_missing,
+                        &mut outcomes,
+                        &mut failed,
+                    )
+                    .await?;
                 }
                 continue;
             }
