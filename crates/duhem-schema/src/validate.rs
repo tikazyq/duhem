@@ -59,7 +59,7 @@ pub fn validate_with_contract_outputs(
     // References in check conditions are checked against the executable,
     // flow-expanded sequence, including private ids and output projections.
     let mut expanded;
-    let v = if v.criteria.iter().flat_map(|c| &c.checks).any(|ch| {
+    let conditions_definition = if v.criteria.iter().flat_map(|c| &c.checks).any(|ch| {
         ch.steps.iter().any(|step| {
             (step.call.is_some() && step.for_each.is_none())
                 || (step.for_each.is_some() && step.for_each_body.is_empty())
@@ -301,6 +301,8 @@ pub fn validate_with_contract_outputs(
         .iter()
         .map(|(id, outputs)| (id.to_string(), outputs.clone()))
         .collect();
+    let condition_setup_outputs =
+        collect_setup_outputs(&conditions_definition.setup, outputs_for, &mut Vec::new());
     let mut seen_criteria: HashSet<&str> = HashSet::new();
     for (criterion_index, c) in v.criteria.iter().enumerate() {
         if !seen_criteria.insert(c.id.as_str()) {
@@ -337,6 +339,26 @@ pub fn validate_with_contract_outputs(
             }
         }
         validate_criterion(c, criterion_index, &definition_scope, &mut errs);
+        let expanded_criterion = &conditions_definition.criteria[criterion_index];
+        let condition_scope = DefinitionScope {
+            fixtures: &conditions_definition.fixtures,
+            inputs: &conditions_definition.inputs,
+            pages: &conditions_definition.pages,
+            flows: &conditions_definition.flows,
+            source_map: &conditions_definition.source_map,
+            setup_outputs: &condition_setup_outputs,
+            outputs_for,
+        };
+        for (check_index, check) in expanded_criterion.checks.iter().enumerate() {
+            check_validation::validate_conditions(
+                expanded_criterion,
+                criterion_index,
+                check,
+                check_index,
+                &condition_scope,
+                &mut errs,
+            );
+        }
     }
 
     if errs.is_empty() { Ok(()) } else { Err(errs) }

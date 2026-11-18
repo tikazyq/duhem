@@ -9,6 +9,29 @@ pub(super) fn validate_check(
     definition: &DefinitionScope<'_>,
     errs: &mut Vec<ValidationError>,
 ) {
+    validate_check_scope(c, criterion_index, ch, check_index, definition, errs, false);
+}
+
+pub(super) fn validate_conditions(
+    c: &Criterion,
+    criterion_index: usize,
+    ch: &Check,
+    check_index: usize,
+    definition: &DefinitionScope<'_>,
+    errs: &mut Vec<ValidationError>,
+) {
+    validate_check_scope(c, criterion_index, ch, check_index, definition, errs, true);
+}
+
+fn validate_check_scope(
+    c: &Criterion,
+    criterion_index: usize,
+    ch: &Check,
+    check_index: usize,
+    definition: &DefinitionScope<'_>,
+    errs: &mut Vec<ValidationError>,
+    conditions_only: bool,
+) {
     let DefinitionScope {
         fixtures,
         inputs,
@@ -37,7 +60,7 @@ pub(super) fn validate_check(
         .collect();
     let source_context_matches =
         source_map.check_context_matches(criterion_index, &c.id, check_index, &ch.id);
-    if let Err(error) = ch.worst_case_step_count() {
+    if !conditions_only && let Err(error) = ch.worst_case_step_count() {
         errs.push(ValidationError::UncomputableStepCount {
             criterion: c.id.clone(),
             check: ch.id.clone(),
@@ -49,7 +72,7 @@ pub(super) fn validate_check(
     // but no assertions the schema layer accepts — whether one of the
     // steps is a judging action (implicit judgment, spec #253) is a
     // catalog question the contract-aware CLI layer answers.
-    if ch.assertions.is_empty() && ch.steps.is_empty() {
+    if !conditions_only && ch.assertions.is_empty() && ch.steps.is_empty() {
         errs.push(ValidationError::NothingToJudge {
             criterion: c.id.clone(),
             check: ch.id.clone(),
@@ -61,7 +84,7 @@ pub(super) fn validate_check(
 
     for &(s, _, _, _) in &check_steps {
         if let Some(id) = &s.id {
-            if !seen_step_ids.insert(id.as_str()) {
+            if !seen_step_ids.insert(id.as_str()) && !conditions_only {
                 errs.push(ValidationError::DuplicateStepId {
                     criterion: c.id.clone(),
                     check: ch.id.clone(),
@@ -146,100 +169,102 @@ pub(super) fn validate_check(
     // calls could fabricate auth state at the authoring boundary. Once
     // parsed, the ordinary reference checker supplies the same
     // undeclared input/setup diagnostics as `with:` (#134).
-    let mut session_outputs = setup_outputs.clone();
-    for step in &c.setup {
-        if let Some(id) = step.id.as_deref() {
-            session_outputs.insert(id, effective_outputs(step, outputs_for));
-        }
-    }
-    let own_setup_ids = ch.setup.iter().filter_map(|s| s.id.as_deref()).collect();
-    let session_scope = PathScope {
-        setup_outputs: &session_outputs,
-        out_of_scope_setup_ids: &own_setup_ids,
-        ..scope
-    };
-    for (name, raw) in ch
-        .session
-        .iter()
-        .flatten()
-        .map(|raw| (None, raw.as_str()))
-        .chain(
-            ch.sessions
-                .iter()
-                .flat_map(|sessions| sessions.iter())
-                .filter_map(|(name, value)| {
-                    value.as_ref().map(|expr| (Some(name), expr.raw.as_str()))
-                }),
-        )
-    {
-        let location = source_context_matches
-            .then(|| {
-                let mut path = crate::source::check_path(
-                    criterion_index,
-                    check_index,
-                    if name.is_some() {
-                        "sessions"
-                    } else {
-                        "session"
-                    },
-                );
-                if let Some(name) = name {
-                    path.push(SourcePathSegment::key(name));
-                }
-                source_map.scalar_location(&path, raw)
-            })
-            .flatten();
-        match crate::expr::parse(raw) {
-            Ok(Expr::Path(path)) => {
-                if matches!(
-                    path.root,
-                    PathRoot::Steps | PathRoot::Fixture | PathRoot::Loop
-                ) {
-                    errs.push(ValidationError::InvalidSessionReference {
-                        criterion: c.id.clone(),
-                        check: ch.id.clone(),
-                        value: raw.to_string(),
-                        location,
-                    });
-                } else {
-                    check_path(
-                        &session_scope,
-                        &path,
-                        None,
-                        raw,
-                        &RefSite::Session,
-                        location,
-                        errs,
-                    );
-                }
+    if !conditions_only {
+        let mut session_outputs = setup_outputs.clone();
+        for step in &c.setup {
+            if let Some(id) = step.id.as_deref() {
+                session_outputs.insert(id, effective_outputs(step, outputs_for));
             }
-            _ => errs.push(ValidationError::InvalidSessionReference {
-                criterion: c.id.clone(),
-                check: ch.id.clone(),
-                value: raw.to_string(),
-                location,
-            }),
         }
-    }
-
-    for (assertion_index, assertion) in ch.assertions.iter().enumerate() {
-        assertion.walk_exprs(|expr_str| {
-            let raw = expr_str.raw.as_str();
+        let own_setup_ids = ch.setup.iter().filter_map(|s| s.id.as_deref()).collect();
+        let session_scope = PathScope {
+            setup_outputs: &session_outputs,
+            out_of_scope_setup_ids: &own_setup_ids,
+            ..scope
+        };
+        for (name, raw) in ch
+            .session
+            .iter()
+            .flatten()
+            .map(|raw| (None, raw.as_str()))
+            .chain(
+                ch.sessions
+                    .iter()
+                    .flat_map(|sessions| sessions.iter())
+                    .filter_map(|(name, value)| {
+                        value.as_ref().map(|expr| (Some(name), expr.raw.as_str()))
+                    }),
+            )
+        {
             let location = source_context_matches
                 .then(|| {
-                    source_map.assertion_location(
+                    let mut path = crate::source::check_path(
                         criterion_index,
                         check_index,
-                        assertion_index,
-                        assertion,
-                        raw,
-                    )
+                        if name.is_some() {
+                            "sessions"
+                        } else {
+                            "session"
+                        },
+                    );
+                    if let Some(name) = name {
+                        path.push(SourcePathSegment::key(name));
+                    }
+                    source_map.scalar_location(&path, raw)
                 })
                 .flatten();
-            walk_checkable_paths(&expr_str.parsed, &mut |p, arity| {
-                check_path(&scope, p, arity, raw, &RefSite::Assertion, location, errs);
+            match crate::expr::parse(raw) {
+                Ok(Expr::Path(path)) => {
+                    if matches!(
+                        path.root,
+                        PathRoot::Steps | PathRoot::Fixture | PathRoot::Loop
+                    ) {
+                        errs.push(ValidationError::InvalidSessionReference {
+                            criterion: c.id.clone(),
+                            check: ch.id.clone(),
+                            value: raw.to_string(),
+                            location,
+                        });
+                    } else {
+                        check_path(
+                            &session_scope,
+                            &path,
+                            None,
+                            raw,
+                            &RefSite::Session,
+                            location,
+                            errs,
+                        );
+                    }
+                }
+                _ => errs.push(ValidationError::InvalidSessionReference {
+                    criterion: c.id.clone(),
+                    check: ch.id.clone(),
+                    value: raw.to_string(),
+                    location,
+                }),
+            }
+        }
+
+        for (assertion_index, assertion) in ch.assertions.iter().enumerate() {
+            assertion.walk_exprs(|expr_str| {
+                let raw = expr_str.raw.as_str();
+                let location = source_context_matches
+                    .then(|| {
+                        source_map.assertion_location(
+                            criterion_index,
+                            check_index,
+                            assertion_index,
+                            assertion,
+                            raw,
+                        )
+                    })
+                    .flatten();
+                walk_checkable_paths(&expr_str.parsed, &mut |p, arity| {
+                    check_path(&scope, p, arity, raw, &RefSite::Assertion, location, errs);
+                });
             });
-        });
+        }
     }
 
     // Beyond assertions, a `$...` reference inside a step's `with:`
@@ -250,7 +275,7 @@ pub(super) fn validate_check(
     // against the same scope.
     let mut preceding_outputs = HashMap::new();
     for (idx, &(s, active_loop, outer, inner)) in check_steps.iter().enumerate() {
-        if let StepCondition::Expr(expr) = &s.condition {
+        if conditions_only && let StepCondition::Expr(expr) = &s.condition {
             let mut path = crate::source::check_path(criterion_index, check_index, "steps");
             path.push(SourcePathSegment::index(outer));
             if let Some(inner) = inner {
@@ -294,6 +319,9 @@ pub(super) fn validate_check(
         }
         if let Some(id) = s.id.as_deref() {
             preceding_outputs.insert(id, step_outputs[id].clone());
+        }
+        if conditions_only {
+            continue;
         }
         if let Some(expr) = &s.for_each {
             walk_checkable_paths(&expr.parsed, &mut |p, arity| {

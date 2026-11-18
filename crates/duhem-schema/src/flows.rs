@@ -1027,7 +1027,7 @@ criteria:
             with: { name: $inputs.user }
           - id: second
             call: greet
-            with: { name: Ada }
+            with: { name: $steps.first.outputs.text }
         assertions:
           - $steps.first.outputs.text == $steps.second.outputs.text
 "#,
@@ -1041,6 +1041,10 @@ criteria:
         assert_eq!(
             check.steps[0].with["args"][0].as_str(),
             Some("$inputs.user")
+        );
+        assert_eq!(
+            check.steps[1].with["args"][0].as_str(),
+            Some("$steps.first__say.outputs.stdout")
         );
         assert_eq!(
             check.assertions[0].display(),
