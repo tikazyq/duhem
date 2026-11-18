@@ -44,6 +44,33 @@ assertions / spans) are derivable server-side exactly as the local
 store derives them. Shipping is **replication, not dual-truth**: a
 bundle is immutable and identified by content.
 
+## Criterion inconclusive policy (#677)
+
+The `run_started` event optionally carries `inconclusive_policy`, one of
+`"block"`, `"warn"` or `"pass"`. The runtime records its effective manifest
+default, including `"block"` when no override was supplied. This policy is a
+judgment input in the event stream, not a run-header verdict or a value inferred
+from the definition snapshot or a passing criterion.
+
+Replay first recomputes and verifies every raw check verdict. It then aggregates
+each criterion's checks and calls the same judge policy function as live
+execution before comparing the recorded criterion verdict. `warn` and `pass`
+soften only an inconclusive criterion; a real failure remains a failure. Run,
+body, check and criterion divergence checks all remain in force.
+
+An absent (or null) policy uses the strict `block` default. Older evidence with
+an inconclusive check and a recorded passing criterion is therefore still
+rejected; replay never guesses that the original run used `warn` or `pass`.
+Unknown policy strings are invalid evidence. The optional field is an additive
+extension within `bundle_version: 1` and trace `schema_version: "v1"`; evidence
+without it retains its canonical wire bytes. No store migration is needed:
+policy travels with the stored/exported event stream and ingest replays it.
+
+The worked definition in `verifications/defaults-example` exercises `warn`:
+AC-2.1 retains `inconclusive:missing_observation` while AC-2 and the run pass.
+The regression in `crates/duhem-runtime/tests/inconclusive_policy_replay.rs`
+covers live execution, bundle round-trip and ingest with all three policies.
+
 ## Identity & idempotency
 
 The bundle's **content hash** is the lowercase-hex SHA-256 of the

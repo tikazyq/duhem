@@ -225,6 +225,10 @@ pub enum EventPayload {
         detail: Option<String>,
     },
     RunStarted {
+        /// Effective criterion policy. Absent on legacy traces, which replay
+        /// with the strict `block` default; never inferred from verdicts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inconclusive_policy: Option<duhem_judge::InconclusivePolicy>,
         verification_path: String,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         inputs: BTreeMap<String, serde_json::Value>,
@@ -586,6 +590,7 @@ mod tests {
             seq: 0,
             ts: ts(),
             payload: EventPayload::RunStarted {
+                inconclusive_policy: None,
                 verification_path: "create-workspace.yml".into(),
                 inputs,
                 schema_version: SCHEMA_VERSION.into(),

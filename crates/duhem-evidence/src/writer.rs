@@ -545,6 +545,7 @@ pub fn run_started_with_viewport(
     viewport: Option<serde_json::Value>,
 ) -> EventPayload {
     EventPayload::RunStarted {
+        inconclusive_policy: None,
         verification_path: verification_path.into(),
         inputs,
         schema_version: SCHEMA_VERSION.to_string(),
