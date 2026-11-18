@@ -154,7 +154,7 @@ reference `id`, then `<uses> #<index>`; engine diagnostics remain keyed
 to `id` so they point at a stable YAML token. Steps may produce named
 outputs that subsequent steps and assertions reference.
 
-Steps also accept a closed `if:` condition. `success` is the default and
+Steps also accept an `if:` condition. An expression adds a value test to the default success gate (§10.3.3). `success` is the default and
 runs only while no earlier step in the same check has failed; `always`
 runs regardless (for teardown); `failure` runs only after an earlier
 failure (for diagnostics). A step failure means `Error`, `Timeout`, or a
@@ -182,7 +182,7 @@ with another true observation in a passing disjunction. The two coincide
 only when an unbound judging output is promoted into an implicit
 assertion.
 
-- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion that is not evaluated because one of its operands comes from a skipped step is omitted; absence is not a fourth state. A step that terminates in `error` or `timeout` contributes an `inconclusive` judgment naming that step, whether or not its action judges. Execution failure of an actuator is an observability gap, not an absence: the steps it was meant to enable never ran, so the check's claims were never exercised. A check whose step sequence aborted therefore cannot aggregate to `pass`. Gated-out steps (`if:` did not match) and cleanup steps (`if: always` after a failure) are exempt — they contribute nothing, as above. An environment failure likewise contributes an `inconclusive` judgment for every non-exempt step, not only judging ones: when the environment never came up, no step observed anything. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
+- **Per-check verdict**: produced by deterministic evaluation of the check’s assertions against observed state. A check’s judged claims are the union of its explicit `assertions:` and the *implicit* assertions contributed by its judging steps (§10.3.2). Every evaluated assertion carries the same three-state `VerdictState` as the final verdict. An assertion referencing an output from a step gated by a false value condition contributes `inconclusive:missing_observation`. Assertions referencing a statically skipped step are omitted unless they also reference a value-gated step. Absence is not a fourth state. A step that terminates in `error` or `timeout` contributes an `inconclusive` judgment naming that step, whether or not its action judges. Execution failure of an actuator is an observability gap, not an absence: the steps it was meant to enable never ran, so the check's claims were never exercised. A check whose step sequence aborted therefore cannot aggregate to `pass`. Gated-out steps (`if:` did not match) and cleanup steps (`if: always` after a failure) are exempt — they contribute nothing, as above. An environment failure likewise contributes an `inconclusive` judgment for every non-exempt step, not only judging ones: when the environment never came up, no step observed anything. Aggregation applies fail → inconclusive → pass precedence directly, and an empty assertion set becomes `inconclusive:empty_aggregation`. A check with only implicit judgment and no explicit `assertions:` is judged exactly as if each judging step’s `satisfied == true` had been written out. This is a spelling convenience, not a semantic change — the judge still evaluates structured boolean claims, with no LLM in the loop.
 - **Conditional claim-set legibility:** absence is not a fourth state; gated steps still contribute nothing. A check records its non-zero count of **judging** steps gated by **value-based** conditions (static gates, upstream blocking, and lifecycle steps never count), and the run report, default/pretty reporters, and agent failure envelope expose that smaller claim set even when the verdict is `pass`. Value-based gating records the authored condition and the operand values actually evaluated in `StepOutcome::Skipped`; upstream failure blocking carries no condition evaluation. These optional fields are omitted, never null. A check with no value-gated judging steps gains no new output, and older traces render unchanged. This clarifies legibility only: verdict aggregation remains the same deterministic, LLM-free evaluation.
 - **Per-criterion verdict**: aggregated from its checks (any check `fail` → criterion `fail`; any `inconclusive` and no `fail` → criterion `inconclusive`; all `pass` → criterion `pass`).
 - **Per-run body verdict**: aggregated from all criteria, same rules. The effective run verdict applies the required fixture-cleanup gate after the body: any retained required fixture `down:` failure makes the run `fail`; otherwise the effective verdict is the body verdict. `CheckFinished` and `CriterionFinished` remain body judgments. The run outcome, persisted `RunFinished.verdict`, CLI exit status, reporters, and dashboard run state use the effective verdict. When the gate changes the run verdict, optional `body_verdict` preserves the body verdict on `RunOutcome`, persisted `RunFinished`, and `RunSummary`; it is omitted when the body and effective verdict match.
@@ -849,19 +849,22 @@ control flow without making them Turing-complete. The existing
 `flow X forms a cycle (a -> b -> a)`) are instances of this totality
 commitment, not standalone guards.
 
-Value-based conditions reuse the existing `Expr` grammar verbatim and
-are available on non-judging `setup:` and `teardown:` steps (Tier 1).
-They are deliberately not yet available on check steps (Tier 2): a
-condition on a step that produces judgments could shrink the check's
-claim set and create a run-dependent false green unless the run report
-makes that reduced claim set visible. Setup and teardown produce no
-judgments by design, so that risk is structurally absent there. A
-condition that cannot be evaluated fails its lifecycle step; inability
-to decide is never silently treated as false. Condition references are
-validated against declared inputs and earlier lifecycle steps and their
-action-contract outputs; forward references are invalid.
+Value-based `if:` conditions use the existing expression grammar. In checks
+an expression is evaluated when the default success gate permits the step to
+run. A false result skips the step. An expression that cannot be evaluated
+records a step error with the condition and its cause, contributes
+`inconclusive:missing_observation`, and lets the run continue. A condition on
+a check's `for_each:` wrapper is evaluated before reading the source array.
+The lifecycle keeps its existing error handling for unresolved conditions.
 
-**Bounded iteration (`for_each:`)** is the other Tier 1 / Tier 2 split
+Check conditions resolve inputs, visible setup and consumed fixture outputs,
+and earlier step outputs (including action-contract outputs and aliases).
+The resolver rejects undeclared, self, and forward references. A `call:`
+condition is applied to every expanded step, and `$steps.<call>.outputs.*`
+references in conditions are rewritten to the corresponding expanded outputs.
+See the [worked SQLite verification](../verifications/check-conditions-example/duhem.yml).
+
+**Bounded iteration (`for_each:`)** is the other construct
 this totality boundary makes room for, alongside value-based `if:`
 (spec #443). A step carrying `for_each:` names a source expression
 that must evaluate to an array; the array is read exactly once, when

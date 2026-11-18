@@ -46,6 +46,10 @@ pub fn validate_with_contract_outputs(
     v: &VerificationDefinition,
     outputs_for: &dyn Fn(&str) -> Vec<String>,
 ) -> Result<(), Vec<ValidationError>> {
+    // The CLI loader already expands flows. Direct schema callers may
+    // pass parsed YAML, where conditions still need the expanded order.
+    let expanded = check_validation::expand_condition_checks(v);
+    let v = expanded.as_ref().unwrap_or(v);
     let mut errs = Vec::new();
     crate::validate_sessions::validate(v, outputs_for, &mut errs);
     crate::validate_process::validate(v, &mut errs);
@@ -3020,21 +3024,69 @@ criteria:
     }
 
     #[test]
-    fn check_step_value_condition_is_rejected_with_a_location() {
+    fn check_conditions_require_declared_and_earlier_references() {
+        for (condition, diagnostic) in [
+            ("$steps.later.outputs.status == 200", "later"),
+            ("$steps.gated.outputs.status == 200", "gated"),
+            ("$steps.absent.outputs.status == 200", "absent"),
+            ("$steps.earlier.outputs.absent == 200", "absent"),
+            ("$steps.earlier.status == 200", "outputs"),
+            ("$inputs.absent == true", "absent"),
+            (
+                "$runtime.default($steps.later.outputs.status, 200) == 200",
+                "later",
+            ),
+            ("$runtime.unknown() == true", "unknown"),
+            ("$setup.absent.outputs.status == 200", "absent"),
+            ("$setup.prepared.outputs.absent == 200", "absent"),
+            (
+                "$fixture.unconsumed.started.outputs.handle == 'x'",
+                "fixture",
+            ),
+            ("$row.enabled == true", "row"),
+        ] {
+            let v = parse(&format!(
+                "verification: x\nsetup:\n  - id: prepared\n    uses: api/call\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        steps:\n          - id: earlier\n            uses: api/call\n          - id: gated\n            uses: api/call\n            if: {condition}\n          - id: later\n            uses: api/call\n        assertions: [\"true\"]\n"
+            ));
+            let errs = validate_with_contract_outputs(&v, &api_call_outputs).unwrap_err();
+            assert!(
+                errs.iter()
+                    .any(|error| error.location().is_some_and(|loc| loc.line == 15)
+                        && error.to_string().contains(diagnostic)),
+                "{condition}: {errs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn expanded_call_condition_rejects_its_own_output_at_the_call_site() {
         let v = parse(
-            "verification: x\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        steps:\n          - uses: cli/invoke\n            if: $inputs.run == true\n        assertions: [\"true\"]\ninputs:\n  run: { type: boolean }\n",
+            r#"verification: x
+flows:
+  inspect:
+    steps:
+      - id: response
+        uses: api/call
+    outputs: {status: $steps.response.outputs.status}
+criteria:
+  - id: AC-1
+    description: x
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: gate
+            call: inspect
+            if: $steps.gate.outputs.status == 200
+        assertions: ["true"]
+"#,
         );
-        let errs = validate(&v).unwrap_err();
-        assert!(
-            errs.iter().any(|e| matches!(
-                e,
-                ValidationError::CheckStepConditionUnavailable {
-                    location: Some(_),
-                    ..
-                }
-            ) && e.to_string().contains("not yet available on check steps")),
-            "{errs:?}"
-        );
+        let mut expanded = v.clone();
+        crate::flows::validate_and_expand(&mut expanded).unwrap();
+        for definition in [&v, &expanded] {
+            let errors = validate_with_contract_outputs(definition, &api_call_outputs).unwrap_err();
+            assert!(errors.iter().any(|error| matches!(error, ValidationError::UnresolvedStepRef { raw, location: Some(location), .. }
+                if raw == "$steps.gate.outputs.status == 200" && location.line == 16)), "{errors:?}");
+        }
     }
 
     #[test]

@@ -236,6 +236,12 @@ pub struct Step {
     #[serde(skip)]
     #[schemars(skip)]
     pub flow_secrets: Vec<serde_yml::Value>,
+
+    /// Authored `if:` copied through check flow expansion for diagnostics and evidence.
+    #[doc(hidden)]
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub condition_origin: Option<(String, crate::SourceLocation)>,
 }
 
 impl Step {

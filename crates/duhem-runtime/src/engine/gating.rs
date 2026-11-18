@@ -27,9 +27,6 @@ pub(crate) fn step_failed(outcome: &Outcome, judgment: Option<VerdictState>) -> 
 }
 
 /// Apply the outcome gate first, then observe the value condition once.
-/// Check-step expression authoring remains blocked by schema validation
-/// until Tier 2; both runners use this evidence path so that boundary can
-/// open without making conditional absence invisible.
 pub(super) fn evaluate(
     step: &duhem_schema::Step,
     index: usize,
@@ -47,17 +44,21 @@ pub(super) fn evaluate(
     let StepCondition::Expr(expr) = &step.condition else {
         return Ok(None);
     };
+    let authored = step
+        .condition_origin
+        .as_ref()
+        .map_or(&expr.raw, |(raw, _)| raw);
     let (result, operands) = crate::eval::operands::evaluate(expr, ctx);
     match result {
         crate::EvalResult::True => Ok(None),
         crate::EvalResult::False => Ok(Some(StepOutcome::Skipped {
-            reason: format!("condition `{}` evaluated false", expr.raw),
-            condition: Some(expr.raw.clone()),
+            reason: format!("condition `{authored}` evaluated false"),
+            condition: Some(authored.clone()),
             operands: Some(operands),
         })),
-        crate::EvalResult::Inconclusive(cause) => Err(super::EngineError::UnresolvedReference {
-            reference: expr.raw.clone(),
-            context: format!(" (condition could not be evaluated: {cause:?})"),
+        crate::EvalResult::Inconclusive(cause) => Err(super::EngineError::UnresolvedCondition {
+            condition: authored.clone(),
+            cause: format!("{cause:?}"),
             step: super::outcome::step_label(step, index),
         }),
     }

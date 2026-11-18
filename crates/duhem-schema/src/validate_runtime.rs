@@ -48,27 +48,36 @@ pub(crate) fn check_runtime_path(
 
 /// Walk references while preserving `default()`'s missing-value carve-out.
 pub(crate) fn walk_checkable_paths<F: FnMut(&Path, Option<usize>)>(expr: &Expr, visit: &mut F) {
+    walk_reference_paths(expr, true, visit);
+}
+
+pub(crate) fn walk_reference_paths<F: FnMut(&Path, Option<usize>)>(
+    expr: &Expr,
+    allow_missing_default: bool,
+    visit: &mut F,
+) {
     match expr {
         Expr::Lit(_) => {}
         Expr::Path(path) => visit(path, None),
         Expr::Call { path, args } => {
             visit(path, Some(args.len()));
-            let skip_first = path.root == PathRoot::Runtime
+            let skip_first = allow_missing_default
+                && path.root == PathRoot::Runtime
                 && path.segments().len() == 1
                 && path.segments()[0] == "default";
             for (index, arg) in args.iter().enumerate() {
                 if skip_first && index == 0 {
                     walk_runtime_calls(arg, visit);
                 } else {
-                    walk_checkable_paths(arg, visit);
+                    walk_reference_paths(arg, allow_missing_default, visit);
                 }
             }
         }
         Expr::BinOp { lhs, rhs, .. } => {
-            walk_checkable_paths(lhs, visit);
-            walk_checkable_paths(rhs, visit);
+            walk_reference_paths(lhs, allow_missing_default, visit);
+            walk_reference_paths(rhs, allow_missing_default, visit);
         }
-        Expr::UnaryOp { expr, .. } => walk_checkable_paths(expr, visit),
+        Expr::UnaryOp { expr, .. } => walk_reference_paths(expr, allow_missing_default, visit),
     }
 }
 

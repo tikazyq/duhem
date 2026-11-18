@@ -206,8 +206,14 @@ Authoring rules:
   should run only after failure. Both still run after a step-level
   engine error before the original error aborts the run. A retried
   check runs its cleanup once per attempt, so cleanup steps must be
-  idempotent. Do not invent expressions under `if:`; its closed
-  vocabulary is `success | always | failure`.
+  idempotent.
+- To gate on an observation, write `if: $steps.probe.outputs.status == 200`.
+  The expression uses the same grammar as assertions and runs only after
+  the success gate. Use earlier step outputs, declared inputs, visible setup
+  outputs, or consumed fixture outputs. A condition on a `call:` applies
+  to every expanded step. A false condition skips the step and reports
+  gated judging steps. An unresolved condition or an assertion referencing
+  a value-gated output yields `inconclusive:missing_observation`.
 - Use role-based locators (`{ role: "button", name: "…" }`) for `ui/*`
   rather than CSS or XPath — UI churn invalidates the latter while
   role-based selectors track the user-visible affordance.

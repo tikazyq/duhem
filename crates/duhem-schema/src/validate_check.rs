@@ -1,6 +1,31 @@
 //! Check references and assertions, including seed timing.
 use super::*;
 
+pub(super) fn expand_condition_checks(
+    v: &VerificationDefinition,
+) -> Option<VerificationDefinition> {
+    let needs_expansion = v.criteria.iter().flat_map(|c| &c.checks).any(|check| {
+        let mut authored = check.steps.iter().flat_map(|step| {
+            std::iter::once(step).chain(
+                step.steps
+                    .iter()
+                    .flatten()
+                    .filter(|_| step.for_each_body.is_empty()),
+            )
+        });
+        authored
+            .clone()
+            .any(|step| step.call.is_some() && step.for_each_body.is_empty())
+            && authored.any(|step| matches!(step.condition, StepCondition::Expr(_)))
+    });
+    if !needs_expansion {
+        return None;
+    }
+    let mut expanded = v.clone();
+    crate::flows::validate_and_expand(&mut expanded).ok()?;
+    Some(expanded)
+}
+
 pub(super) fn validate_check(
     c: &Criterion,
     criterion_index: usize,
@@ -57,29 +82,7 @@ pub(super) fn validate_check(
     let mut step_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
     let mut seen_step_ids: HashSet<&str> = HashSet::new();
 
-    for (idx, &(s, _)) in check_steps.iter().enumerate() {
-        if matches!(s.condition, StepCondition::Expr(_)) {
-            let path = [
-                SourcePathSegment::key("criteria"),
-                SourcePathSegment::index(criterion_index),
-                SourcePathSegment::key("checks"),
-                SourcePathSegment::index(check_index),
-                SourcePathSegment::key("steps"),
-                SourcePathSegment::index(idx),
-                SourcePathSegment::key("if"),
-            ];
-            let raw = match &s.condition {
-                StepCondition::Expr(e) => e.raw.as_str(),
-                _ => unreachable!(),
-            };
-            errs.push(ValidationError::CheckStepConditionUnavailable {
-                criterion: c.id.clone(),
-                check: ch.id.clone(),
-                location: source_context_matches
-                    .then(|| source_map.scalar_location(&path, raw))
-                    .flatten(),
-            });
-        }
+    for &(s, _) in &check_steps {
         if let Some(id) = &s.id {
             if !seen_step_ids.insert(id.as_str()) {
                 errs.push(ValidationError::DuplicateStepId {
@@ -262,6 +265,58 @@ pub(super) fn validate_check(
         });
     }
 
+    // A condition runs before its action. Loop body outputs are visible
+    // only within that iteration, even though assertions can name them.
+    let mut preceding = HashMap::new();
+    let mut path = crate::source::check_path(criterion_index, check_index, "steps");
+    for (index, step) in ch.steps.iter().enumerate() {
+        path.push(SourcePathSegment::index(index));
+        validate_condition(
+            step,
+            index,
+            &PathScope {
+                step_outputs: &preceding,
+                ..scope
+            },
+            source_map,
+            source_context_matches.then_some(path.as_slice()),
+            errs,
+        );
+        if step.for_each.is_some() {
+            let mut body_outputs = preceding.clone();
+            let body = if step.for_each_body.is_empty() {
+                step.steps.as_deref().unwrap_or(&[])
+            } else {
+                &step.for_each_body
+            };
+            path.push(SourcePathSegment::key("steps"));
+            for (inner_index, inner) in body.iter().enumerate() {
+                path.push(SourcePathSegment::index(inner_index));
+                validate_condition(
+                    inner,
+                    inner_index,
+                    &PathScope {
+                        active_loop: step.as_binding.as_deref(),
+                        step_outputs: &body_outputs,
+                        ..scope
+                    },
+                    source_map,
+                    (source_context_matches && step.for_each_body.is_empty())
+                        .then_some(path.as_slice()),
+                    errs,
+                );
+                if let Some(id) = inner.id.as_deref() {
+                    body_outputs.insert(id, step_outputs[id].clone());
+                }
+                path.pop();
+            }
+            path.pop();
+        } else if let Some(id) = step.id.as_deref() {
+            preceding.insert(id, step_outputs[id].clone());
+        }
+        path.pop();
+    }
+
     // Beyond assertions, a `$...` reference inside a step's `with:`
     // payload is the most common place an author writes one — and was
     // historically unscanned, so a typo'd or undeclared ref reached
@@ -329,4 +384,47 @@ pub(super) fn validate_check(
             });
         });
     }
+}
+
+fn validate_condition(
+    step: &Step,
+    index: usize,
+    scope: &PathScope<'_>,
+    source_map: &crate::SourceMap,
+    step_path: Option<&[SourcePathSegment]>,
+    errs: &mut Vec<ValidationError>,
+) {
+    let StepCondition::Expr(expr) = &step.condition else {
+        return;
+    };
+    let (raw, location) = match &step.condition_origin {
+        Some((authored, location)) => (authored.as_str(), Some(*location)),
+        None => (
+            expr.raw.as_str(),
+            step_path.and_then(|path| {
+                let mut path = path.to_vec();
+                path.push(SourcePathSegment::key("if"));
+                source_map.scalar_location(&path, &expr.raw)
+            }),
+        ),
+    };
+    let site = RefSite::StepCondition {
+        step: step_label(step, index),
+    };
+    crate::validate_runtime::walk_reference_paths(&expr.parsed, false, &mut |p, arity| {
+        if p.root == PathRoot::Runtime {
+            let mut errors = Vec::new();
+            check_path(scope, p, arity, raw, &site, location, &mut errors);
+            errs.extend(
+                errors
+                    .into_iter()
+                    .map(|error| ValidationError::InvalidStepCondition {
+                        message: error.to_string(),
+                        location,
+                    }),
+            );
+        } else {
+            check_path(scope, p, arity, raw, &site, location, errs);
+        }
+    });
 }

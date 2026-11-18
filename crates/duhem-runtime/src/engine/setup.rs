@@ -604,6 +604,7 @@ mod tests {
             for_each_body: Vec::new(),
             flow: None,
             flow_secrets: Vec::new(),
+            condition_origin: None,
         }
     }
 

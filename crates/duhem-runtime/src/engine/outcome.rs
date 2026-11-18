@@ -59,6 +59,12 @@ pub enum EngineError {
         /// `<expr>`)` when the reference is a sub-part of a larger call.
         context: String,
     },
+    #[error("step `{step}`: condition could not be evaluated: `{condition}` ({cause})")]
+    UnresolvedCondition {
+        condition: String,
+        step: String,
+        cause: String,
+    },
     /// A `$inputs.<name>` reference names an input the leaf declared
     /// with `inherit: true` (spec #135), but nothing on the resolution
     /// chain bound it — no manifest profile was selected and no
@@ -109,6 +115,7 @@ pub(crate) struct StepEvidence {
     /// assertion verdict; this distinguishes it from an unrun step
     /// whose observation is genuinely missing.
     pub skip_reason: Option<String>,
+    pub value_gated: bool,
     /// Authored catalog coordinate, retained after the map is spliced
     /// so a failure points back to the one shared entry to edit.
     pub catalog_reference: Option<String>,
@@ -129,17 +136,19 @@ impl StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             skip_reason: None,
+            value_gated: false,
             catalog_reference: None,
             outcome: None,
             detail: None,
         }
     }
 
-    pub fn skipped(reason: String) -> Self {
+    pub fn skipped(reason: String, value_gated: bool) -> Self {
         StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             skip_reason: Some(reason),
+            value_gated,
             catalog_reference: None,
             outcome: None,
             detail: None,
@@ -428,6 +437,7 @@ pub(crate) async fn evaluate_explicit_assertions(
     environment_failed: bool,
     browser_missing: bool,
     step_evidence: &[StepEvidence],
+    only_value_gated: bool,
     cleanup_steps: &BTreeSet<usize>,
     assertion_outcomes: &mut Vec<AssertionOutcome>,
     failed: &mut Vec<FailedAssertion>,
@@ -439,11 +449,19 @@ pub(crate) async fn evaluate_explicit_assertions(
         // (an explicit `$steps.update.outputs.status == 200` IS about the
         // `update` step, #279 follow-up).
         let step_index = owning_step_index(&expr, check);
-        if skipped_reference_reason(&expr, check, step_evidence).is_some() {
+        let (value_gated, skipped) = skipped_references(&expr, check, step_evidence);
+        if value_gated.is_none() && (skipped || only_value_gated) {
             continue;
         }
         let mut operands = BTreeMap::new();
-        let (state, detail) = if any_unknown {
+        let (state, detail) = if let Some(id) = value_gated {
+            (
+                VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
+                Some(format!(
+                    "step `{id}` produced no observation because its condition evaluated false"
+                )),
+            )
+        } else if any_unknown {
             (
                 VerdictState::Inconclusive(InconclusiveCause::MissingObservation),
                 Some("unknown_action".to_string()),
@@ -489,7 +507,8 @@ pub(crate) async fn evaluate_explicit_assertions(
                 expr: Some(assertion.display()),
             })
             .await?;
-        let cleanup_assertion = references_cleanup_step(&expr, check, cleanup_steps);
+        let cleanup_assertion =
+            value_gated.is_none() && references_cleanup_step(&expr, check, cleanup_steps);
         if !cleanup_assertion && !matches!(state, VerdictState::Pass) {
             failed.push(FailedAssertion {
                 expr: assertion.display(),
@@ -552,20 +571,25 @@ fn steps_referenced(expr: &Expr, out: &mut BTreeSet<String>) {
     }
 }
 
-fn skipped_reference_reason(
+fn skipped_references<'a>(
     expr: &Expr,
-    check: &duhem_schema::Check,
+    check: &'a duhem_schema::Check,
     evidence: &[StepEvidence],
-) -> Option<String> {
+) -> (Option<&'a str>, bool) {
     let mut refs = BTreeSet::new();
     steps_referenced(expr, &mut refs);
-    check.steps.iter().enumerate().find_map(|(index, step)| {
-        let id = step.id.as_ref()?;
-        if !refs.contains(id) {
-            return None;
+    let mut skipped = false;
+    for (step, state) in check.steps.iter().zip(evidence) {
+        if let Some(id) = &step.id
+            && refs.contains(id)
+        {
+            if state.value_gated {
+                return (Some(id), true);
+            }
+            skipped |= state.skip_reason.is_some();
         }
-        evidence.get(index)?.skip_reason.clone()
-    })
+    }
+    (None, skipped)
 }
 
 /// If an explicit assertion references exactly one step (`$steps.<id>`),
@@ -646,9 +670,13 @@ pub(crate) async fn append_implicit_judgment(
 }
 
 pub(crate) fn step_label(step: &duhem_schema::Step, idx: usize) -> String {
-    step.id
-        .clone()
-        .unwrap_or_else(|| format!("{} #{idx}", step.uses_name()))
+    step.id.clone().unwrap_or_else(|| {
+        if step.for_each.is_some() {
+            format!("for_each #{}", idx + 1)
+        } else {
+            format!("{} #{idx}", step.uses_name())
+        }
+    })
 }
 
 /// A step's human-facing label for reports and run views. Authored
@@ -765,6 +793,7 @@ mod fail_detail_tests {
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect(),
             skip_reason: None,
+            value_gated: false,
             catalog_reference: None,
             outcome: Some(Outcome::Ok),
             detail: None,
@@ -972,6 +1001,7 @@ mod step_label_tests {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::from([("satisfied".to_string(), serde_json::json!(false))]),
             skip_reason: None,
+            value_gated: false,
             catalog_reference: None,
             outcome: Some(Outcome::Ok),
             detail: None,

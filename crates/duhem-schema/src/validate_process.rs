@@ -117,8 +117,10 @@ criteria:
             with: { command: sleep, args: ["30"] }
         steps:
           - uses: process/inspect
+            if: $setup.local.outputs.handle != ''
             with: { handle: $setup.local.outputs.handle }
           - uses: process/stop
+            if: $fixture.watcher.worker.outputs.handle != ''
             with: { handle: $fixture.watcher.worker.outputs.handle }
         assertions: ["true"]
 "#;

@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::assertion::Assertion;
 use crate::includes::MAX_INCLUDE_DEPTH;
-use crate::source::StepSourceOrigin;
+use crate::source::{SourceMap, SourcePathSegment as S, StepSourceOrigin, check_path};
 use crate::step::{ExpandedFlowOrigin, Step, StepCondition};
 use crate::verification::{Flow, FlowCatalog, InputDecl, InputType, VerificationDefinition};
 
@@ -28,7 +28,12 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
     let catalog = definition.flows.clone();
     for (criterion_index, criterion) in definition.criteria.iter_mut().enumerate() {
         for (check_index, check) in criterion.checks.iter_mut().enumerate() {
-            let authored = std::mem::take(&mut check.steps);
+            let mut authored = std::mem::take(&mut check.steps);
+            remember_conditions(
+                &mut authored,
+                &definition.source_map,
+                &mut check_path(criterion_index, check_index, "steps"),
+            );
             let mut counter = 0usize;
             let mut expanded = expand_sequence(
                 authored,
@@ -48,6 +53,7 @@ pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Re
             );
             check.steps = expanded.steps;
             rewrite_steps(&mut check.steps, &expanded.projections);
+            rewrite_check_conditions(&mut check.steps, &expanded.projections);
             for assertion in &mut check.assertions {
                 rewrite_assertion(assertion, &expanded.projections);
             }
@@ -248,6 +254,7 @@ fn blank_step() -> Step {
         for_each_body: Vec::new(),
         flow: None,
         flow_secrets: Vec::new(),
+        condition_origin: None,
     }
 }
 
@@ -388,6 +395,7 @@ fn expand_sequence(
         );
         for inner in &mut expanded.steps {
             inner.condition = step.condition.clone();
+            inner.condition_origin = step.condition_origin.clone();
         }
 
         let mut direct_ids = BTreeMap::new();
@@ -594,6 +602,37 @@ fn rewrite_steps(steps: &mut [Step], projections: &BTreeMap<String, String>) {
                 .expect("rewriting a valid step reference preserves expression syntax");
         }
         rewrite_steps(&mut step.for_each_body, projections);
+    }
+}
+
+fn remember_conditions(steps: &mut [Step], source_map: &SourceMap, path: &mut Vec<S>) {
+    for (index, step) in steps.iter_mut().enumerate() {
+        path.push(S::index(index));
+        if let StepCondition::Expr(expr) = &step.condition
+            && step.condition_origin.is_none()
+        {
+            path.push(S::key("if"));
+            step.condition_origin = source_map
+                .scalar_location(path, &expr.raw)
+                .map(|location| (expr.raw.clone(), location));
+            path.pop();
+        }
+        if let Some(body) = &mut step.steps {
+            path.push(S::key("steps"));
+            remember_conditions(body, source_map, path);
+            path.pop();
+        }
+        path.pop();
+    }
+}
+
+fn rewrite_check_conditions(steps: &mut [Step], projections: &BTreeMap<String, String>) {
+    for step in steps {
+        if let StepCondition::Expr(expr) = &mut step.condition {
+            *expr = crate::ExprStr::from_source(&rewrite_string(&expr.raw, projections))
+                .expect("rewriting a valid step reference preserves expression syntax");
+        }
+        rewrite_check_conditions(&mut step.for_each_body, projections);
     }
 }
 

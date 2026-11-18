@@ -721,6 +721,7 @@ async fn invoke_and_record(
             Outcome::Skipped { reason } => Some(reason.clone()),
             _ => None,
         },
+        value_gated: false,
         catalog_reference: None,
         outcome: Some(outcome.clone()),
         detail: action_detail

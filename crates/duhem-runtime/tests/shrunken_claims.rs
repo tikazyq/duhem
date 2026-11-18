@@ -1,4 +1,4 @@
-//! Real SQLite actions exercise gating without opening Tier 2 authoring.
+//! Real SQLite actions exercise check and lifecycle condition evidence.
 use std::{collections::BTreeMap, sync::Arc};
 
 use duhem_dashboard::EvidenceReader;
@@ -47,6 +47,7 @@ async fn lifecycle_conditions_record_actual_operands_but_only_value_check_gates_
         ("always", 0),
         ("failure", 0),
         ("$setup.count_rows.outputs.row_count > 0", 1),
+        ("$setup.count_rows.outputs.row_count == 0", 0),
     ] {
         let outcome = Engine::new()
             .with_store(store.clone())
@@ -103,16 +104,12 @@ async fn value_gated_trace_renders_differently_and_replays_identically_without_m
     );
     let reader = EvidenceReader::new(store.clone());
     let def = definition("$setup.count_rows.outputs.row_count > 0");
-    // Exercise the internal evidence path; the public Tier 2 authoring
-    // boundary remains closed and is pinned here.
-    assert!(
-        duhem_schema::validate(&def)
-            .unwrap_err()
-            .iter()
-            .any(|error| error
-                .to_string()
-                .contains("value-based conditions are not yet available"))
-    );
+    duhem_schema::validate_with_contract_outputs(&def, &|uses| {
+        duhem_actions::contract_for(uses)
+            .map(|c| c.outputs.iter().map(|o| o.to_string()).collect())
+            .unwrap_or_default()
+    })
+    .unwrap();
     let outcome = Engine::new()
         .with_store(store.clone())
         .run_with_metadata(&def, BTreeMap::new())

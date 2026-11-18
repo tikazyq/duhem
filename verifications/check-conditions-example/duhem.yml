@@ -1,0 +1,37 @@
+verification: Check step conditions
+spec_ref: https://github.com/onsager-ai/duhem/issues/663
+
+flows:
+  inspect_jobs:
+    steps:
+      - id: jobs
+        uses: db/query
+        with: { connection: 'sqlite::memory:', sql: "select 'ready' as status" }
+    outputs:
+      count: $steps.jobs.outputs.row_count
+  verify_ready:
+    steps:
+      - id: ready
+        uses: db/observe
+        with: { connection: 'sqlite::memory:', sql: "select 'ready' as status", until: { row_count: 1 } }
+      - uses: db/observe
+        with: { connection: 'sqlite::memory:', sql: "select 'ready' as status", until: { row_count: 1 } }
+    outputs:
+      satisfied: $steps.ready.outputs.satisfied
+
+criteria:
+  - id: AC-1
+    description: Follow-up checks run only when the observed state calls for them, and evidence shows which judging steps were gated.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: jobs
+            call: inspect_jobs
+          - id: when_ready
+            call: verify_ready
+            if: $steps.jobs.outputs.count > 0
+          - id: when_empty
+            call: verify_ready
+            if: $steps.jobs.outputs.count == 0
+        assertions:
+          - $steps.when_ready.outputs.satisfied == true

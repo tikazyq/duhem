@@ -32,6 +32,7 @@ impl Engine {
                 Ok(gate) => (gate, None),
                 Err(error) => (None, Some(error)),
             };
+            let unresolved_condition = condition_error.is_some();
             let cleanup_step = failed_by.is_some() && gate.is_none();
             if cleanup_step {
                 cleanup_steps.insert(idx);
@@ -134,7 +135,8 @@ impl Engine {
                 operands,
             }) = gate
             {
-                if condition.is_some()
+                let value_gated = condition.is_some();
+                if value_gated
                     && self
                         .registry
                         .get(step.uses_name())
@@ -153,24 +155,25 @@ impl Engine {
                         detail: None,
                     })
                     .await?;
-                step_evidence[idx] = StepEvidence::skipped(reason);
+                step_evidence[idx] = StepEvidence::skipped(reason, value_gated);
                 continue;
             }
 
             if let Some(error) = step_error {
-                // The process-level engine error already has the pinpointed
-                // `with:` reference and enclosing expression. Preserve that
-                // exact diagnostic in evidence, through the same secret
-                // boundary as every recorded string (#494).
+                // Preserve the unresolved reference and expression through
+                // the same secret boundary as other evidence (#494).
                 let detail = writer.mask_text(&error.to_string());
                 writer
                     .append(EventPayload::StepFinished {
                         step_index: idx as u32,
                         outcome: duhem_evidence::StepOutcome::Error,
-                        detail: Some(detail),
+                        detail: Some(detail.clone()),
                     })
                     .await?;
-                if !cleanup_step && stored_error.is_none() {
+                if unresolved_condition {
+                    step_evidence[idx].outcome = Some(Outcome::Error);
+                    step_evidence[idx].detail = Some(detail);
+                } else if !cleanup_step && stored_error.is_none() {
                     *stored_error = Some(error);
                 }
                 if failed_by.is_none() {
@@ -263,6 +266,7 @@ impl Engine {
                         with: resolved_with.clone(),
                         outputs: r.outputs.clone(),
                         skip_reason: None,
+                        value_gated: false,
                         catalog_reference: catalog_reference.clone(),
                         outcome: Some(r.outcome.clone()),
                         detail: None,

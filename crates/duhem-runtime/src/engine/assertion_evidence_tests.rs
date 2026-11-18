@@ -63,6 +63,7 @@ assertions:
         false,
         false,
         &[],
+        false,
         &BTreeSet::new(),
         &mut outcomes,
         &mut failures,
