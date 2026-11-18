@@ -305,16 +305,17 @@ Make an HTTP request and observe the response.
 
 ### `api/observe`
 
-Observe a network request the page made (matched by method + URL pattern).
+Observe a network request the page made (matched by method + URL pattern). Optional `window: { from_step, edge: start | finish, duration }` collects request starts; see [window authoring](request-window-authoring.md).
 
 | `with:` field | required | values |
 |---|:---:|---|
-| `method` | yes | — |
+| `method` | no | — |
 | `url_pattern` | yes | — |
 | `after` | no | — |
+| `window` | no | — |
 | `timeout` | no | — |
 
-**outputs:** `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body`, `request_headers`
+**outputs:** `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body`, `request_headers`, `count`, `requests`, `window`, `complete`, `truncated`
 
 ```yaml
 - uses: api/observe

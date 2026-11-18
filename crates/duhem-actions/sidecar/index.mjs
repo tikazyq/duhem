@@ -128,6 +128,36 @@ const contexts = new Map()
 const pages = new Map()
 /** @type {Map<string, NetworkRecord[]>} */
 const networkBuffers = new Map()
+// Separate request-start ledger: legacy response ordering is unchanged.
+const requestLedgers = new Map()
+
+function attachRequestLedger(p, ledger, sessionStart) {
+  const records = new WeakMap()
+  const now = () => Math.max(0, performance.now() - sessionStart)
+  p.on('request', request => {
+    const rec = {
+      sequence: ledger.length, method: request.method(), url: request.url(),
+      started_ms: now(), response_ms: null, finished_ms: null, status: null, state: 'pending', error: null,
+    }
+    records.set(request, rec)
+    ledger.push(rec)
+  })
+  p.on('response', response => {
+    const rec = records.get(response.request())
+    if (rec) { rec.status = response.status(); rec.response_ms = now() }
+  })
+  p.on('requestfinished', request => {
+    const rec = records.get(request)
+    if (rec) { rec.state = 'finished'; rec.finished_ms = now() }
+  })
+  p.on('requestfailed', request => {
+    const rec = records.get(request)
+    if (rec) {
+      rec.state = 'failed'; rec.finished_ms = now()
+      rec.error = request.failure()?.errorText || 'request failed'
+    }
+  })
+}
 /** @type {Map<string, number>} */
 const sessionStarts = new Map()
 // Video recording (#215) is per-context and finalized only on
@@ -460,6 +490,10 @@ async function dispatch(req) {
       const sessionStart = performance.now()
       sessionStarts.set(id, sessionStart)
       attachNetworkRecorder(p, buf, sessionStart)
+      const ledger = []
+      requestLedgers.set(id, ledger)
+      attachRequestLedger(p, ledger, sessionStart)
+      p.once('close', () => requestLedgers.delete(id))
       return { pageId: id }
     }
 
@@ -694,6 +728,25 @@ async function dispatch(req) {
       if (!buf) throw new Error(`unknown pageId: ${req.pageId}`)
       const from = req.cursor || 0
       return { events: buf.slice(from), cursor: buf.length }
+    }
+
+    case 'requestWindow': {
+      const ledger = requestLedgers.get(req.pageId)
+      if (!ledger) throw new Error(`unknown pageId: ${req.pageId}`)
+      const matches = ledger.filter(r => r.started_ms >= req.startMs && r.started_ms < req.endMs)
+      const requests = matches.map(record => {
+        const r = { ...record }
+        if (r.response_ms !== null && r.response_ms >= req.endMs) {
+          r.response_ms = null; r.status = null
+        }
+        // Snapshot terminal state at the closing boundary, even when observe
+        // runs after the window has already closed.
+        if (r.finished_ms !== null && r.finished_ms >= req.endMs) {
+          return { ...r, finished_ms: null, state: 'pending', error: null }
+        }
+        return { ...r }
+      })
+      return { requests }
     }
 
     case 'sessionTime': {

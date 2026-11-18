@@ -141,6 +141,7 @@ async fn observe_captures_fetch_triggered_by_click() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        ..Default::default()
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -201,6 +202,9 @@ timeout: 2s
     );
     // Decoded payload bytes of `{"id":"p1","name":"Demo"}`.
     assert_eq!(r.outputs["body_bytes"], serde_json::json!(25));
+    for name in ["count", "requests", "window", "complete", "truncated"] {
+        assert!(!r.outputs.contains_key(name), "legacy mode emitted {name}");
+    }
     assert!(r.observations.is_empty());
 }
 
@@ -212,6 +216,7 @@ async fn observe_after_click(button_name: &str, path: &str) -> duhem_actions::Ac
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        ..Default::default()
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -267,6 +272,7 @@ async fn observe_json_parse_failure_emits_observation() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        ..Default::default()
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
@@ -313,6 +319,7 @@ async fn observe_times_out_when_no_event_matches() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        ..Default::default()
     };
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))

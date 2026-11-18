@@ -1641,7 +1641,7 @@ single-match rule. Thresholds live in VD assertions, for example
 **API actions**
 
 - `api/call` — make an HTTP request actively; outputs `status`, `body`, `body_text`, `body_bytes` and `headers`
-- `api/observe` — passively observe an HTTP request the UI triggers (network sniffing); outputs `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body` and `request_headers`
+- `api/observe` — passively observe an HTTP request the UI triggers (network sniffing); legacy outputs `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body` and `request_headers`. Opt-in `window: { from_step, edge: start | finish, duration }` collects requests by start in a half-open interval on the selected session's clock and emits `count`, `requests`, `window`, `complete`, `truncated` instead. Anchors are read-only step start/finish boundaries owned by the current check attempt, independent of capture policy; absent or cross-session anchors error. Static validation requires an earlier step in the same block, rejects flow-body anchors, unknown edges, and non-positive/malformed durations, including in `for_each` bodies. Request-start order, duplicate URLs, redirect hops, aborts and pending entries survive collection; terminal facts after closure stay pending. Retain at most 1,000 matching entries and mark overflow as truncated/incomplete. Stored URLs use the evidence secret masker without changing count or order. Without a window the legacy response recorder is unchanged. See [action reference](action-reference.md#apiobserve) and [worked verification](../crates/duhem-actions/tests/fixtures/api-observe-window.yml) (#603 / #663).
 - `api/poll` — re-hit an endpoint until a response condition holds or a timeout elapses
 - `api/stream` — follow an open-ended SSE / `text/event-stream` from an in-progress source, collecting ordered events until a terminal condition (`until_event` / `max_events` / server close) or the `timeout:` budget; outputs `events` / `event_count` / `last_event` for mechanical assertion
 
@@ -1667,6 +1667,15 @@ Both response-side actions declare their outputs in the catalog, so `$steps.<id>
 All four are non-judging. Setup/fixture-up spawn/readiness failure makes dependent checks inconclusive with environment-error semantics; body errors retain masked detail and inconclusive missing observations. Ownership follows declaring leaf/criterion/check/fixture scope, independently of browser context. Only the current check or its fixtures may be stopped/restarted; enclosing handles are inspect-only, and sibling/retry handles are rejected. After authored cleanup, reverse-order process finalizers are always required, including diagnostic-only fixtures, retries and observed cancellation; failures block the effective gate while preserving body judgments. Ordinary teardown/provision diagnostics retain their semantics.
 
 Linux/macOS use owned process groups; unsupported platforms reject before spawn. Detached daemons, interactive protocols and port leases are outside the contract. See [exact lifecycle/log/timeout semantics](owned-processes.md) and the [executable HTTP/restart example](../verifications/owned-process-example/duhem.yml). These actions first shipped in v0.7.1; they are not in v0.7.0 or earlier tags.
+
+#### Schema impact — request collection windows (#603 / #663)
+
+- **Category:** additive.
+- **Surfaces touched:** action-type catalog, runtime action context, evidence outputs.
+- **Fields added/renamed/removed:** optional `api/observe.with.window` with `from_step`, `edge`, `duration`; outputs `count`, `requests`, `window`, `complete`, `truncated`. Existing response outputs remain declared and legacy invocation semantics stay unchanged.
+- **Migration:** none; collection is opt-in. [Authoring guidance](request-window-authoring.md) and a [worked Verification Definition](../crates/duhem-actions/tests/fixtures/api-observe-window.yml) describe the contract.
+- **CHANGELOG.md entry:** `- [additive] api/observe accepts step-anchored collection windows with ordered request, pending, redirect and abort evidence, bounded collections and secret masking. (#603) (#663)`
+- **Alignment:** preserves holistic browser verification, deterministic judgment, stable criteria and the independent evidence boundary. No identity commitment changes.
 
 #### Planned (Phase 2+ — §14)
 

@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] `api/observe` accepts step-anchored collection windows with ordered request, pending, redirect and abort evidence, bounded collections and secret masking. (#603) (#663)
+
 - [additive] `ui/extract` accepts `field: rect` (CSS-px bounding rect plus scroll offsets) and `style: <property>` (computed CSS value). (#580)
 - [additive] New `ui/emulate` action sets the check's viewport and `prefers-color-scheme` and reports the effective settings; each check and retry starts from defaults. (#580)
 - [additive] New `ui/back` / `ui/forward` actions drive real browser history and report `from_url`, `url` and `navigated` (false when no entry exists). (#580)

@@ -94,6 +94,7 @@ pub(super) fn resolve_source(source: Option<&str>, run: &RunState) -> SessionRes
 /// Contexts and investigation evidence owned by one check attempt.
 #[derive(Default)]
 pub(crate) struct CheckContexts {
+    pub step_times: BTreeMap<String, duhem_actions::action::StepTime>,
     pub browsers: BTreeMap<Option<String>, duhem_actions::CheckBrowser>,
     pub targets: BTreeMap<Option<String>, Vec<super::capture::TargetLocator>>,
     pub storyboards: BTreeMap<Option<String>, super::capture::Storyboard>,

@@ -136,6 +136,80 @@ pub(crate) struct With {
     /// Max wait for a matching event. Defaults to [`DEFAULT_TIMEOUT`].
     #[serde(default)]
     timeout: Option<TimeoutSpec>,
+    #[serde(default)]
+    window: Option<Window>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Window {
+    from_step: String,
+    edge: Edge,
+    duration: TimeoutSpec,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Edge {
+    Start,
+    Finish,
+}
+
+async fn collect_window(
+    ctx: &ActionCtx<'_>,
+    window: &Window,
+    matcher: &UrlMatcher,
+    method: Option<&str>,
+) -> Result<ActionResult, ActionError> {
+    let error = |message: &str| ActionError::Playwright(format!("api/observe window: {message}"));
+    if window.duration.0.is_zero() {
+        return Err(error("duration must be positive"));
+    }
+    let anchor = ctx
+        .step_times
+        .and_then(|times| times.get(&window.from_step))
+        .ok_or_else(|| error("anchor step is missing from this check attempt"))?;
+    if anchor.session.as_deref() != ctx.session {
+        return Err(error("anchor is on a different browser session"));
+    }
+    let start_ms = match window.edge {
+        Edge::Start => anchor.start_ms,
+        Edge::Finish => anchor.finish_ms,
+    };
+    let end_ms = start_ms + window.duration.0.as_secs_f64() * 1000.0;
+    let page = ctx.require_page()?;
+    loop {
+        let now = page
+            .session_time_ms()
+            .await
+            .map_err(|e| error(&e.to_string()))?;
+        if now >= end_ms {
+            break;
+        }
+        sleep(Duration::from_secs_f64(((end_ms - now) / 1000.0).min(0.05))).await;
+    }
+    let snapshot = page
+        .request_window(start_ms, end_ms)
+        .await
+        .map_err(|e| error(&e.to_string()))?;
+    let mut requests: Vec<_> = snapshot["requests"]
+        .as_array()
+        .ok_or_else(|| error("invalid request snapshot"))?
+        .iter()
+        .filter(|request| {
+            matcher.matches(request["url"].as_str().unwrap_or(""))
+                && method.is_none_or(|m| request["method"].as_str() == Some(m))
+        })
+        .cloned()
+        .collect();
+    let truncated = requests.len() > 1000;
+    requests.truncate(1000);
+    Ok(ActionResult::ok()
+        .with_output("count", serde_json::json!(requests.len()))
+        .with_output("requests", serde_json::json!(requests))
+        .with_output("window", serde_json::json!({ "from_step": window.from_step, "edge": match window.edge { Edge::Start => "start", Edge::Finish => "finish" }, "start_ms": start_ms, "end_ms": end_ms }))
+        .with_output("complete", serde_json::json!(!truncated))
+        .with_output("truncated", serde_json::json!(truncated)))
 }
 
 pub struct Observe;
@@ -150,11 +224,12 @@ impl Action for Observe {
         use crate::action::{ActionContract, FieldSpec};
         ActionContract {
             uses: "api/observe",
-            summary: "Observe a network request the page made (matched by method + URL pattern).",
+            summary: "Observe a network request the page made (matched by method + URL pattern). Optional `window: { from_step, edge: start | finish, duration }` collects request starts; see [window authoring](request-window-authoring.md).",
             with: vec![
-                FieldSpec::required("method"),
+                FieldSpec::optional("method"),
                 FieldSpec::required("url_pattern"),
                 FieldSpec::optional("after"),
+                FieldSpec::optional("window"),
                 FieldSpec::optional("timeout"),
             ],
             outputs: vec![
@@ -167,6 +242,11 @@ impl Action for Observe {
                 "headers",
                 "request_body",
                 "request_headers",
+                "count",
+                "requests",
+                "window",
+                "complete",
+                "truncated",
             ],
             secret_outputs: vec![],
             example: "- uses: api/observe\n  with: { method: POST, url_pattern: \"**/api/login\" }",
@@ -188,6 +268,9 @@ impl Action for Observe {
 
         let matcher = UrlMatcher::parse(&with.url_pattern)?;
         let method_filter = with.method.as_deref().map(str::to_ascii_uppercase);
+        if let Some(window) = &with.window {
+            return collect_window(ctx, window, &matcher, method_filter.as_deref()).await;
+        }
 
         // Poll the sidecar's per-page recorder until a matching event
         // appears or `timeout:` elapses. `cursor` advances past events

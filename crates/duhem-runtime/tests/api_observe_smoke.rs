@@ -105,3 +105,58 @@ async fn api_observe_captures_clicked_post_and_passes_end_to_end() {
     let verdict = engine.run(&def, inputs).await.expect("engine.run");
     assert_eq!(verdict.state, VerdictState::Pass, "verdict = {verdict:?}");
 }
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn request_window_anchors_work_without_capture_and_mask_persisted_urls() {
+    let fx = start_fixture().await;
+    let definition = VerificationDefinition::from_yaml_str(include_str!(
+        "../../duhem-actions/tests/fixtures/api-observe-window.yml"
+    ))
+    .unwrap();
+    let browser = RunBrowser::launch(false).await.unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let store = std::sync::Arc::new(
+        duhem_evidence::SqliteStore::open(tmp.path().join("window.db"))
+            .await
+            .unwrap(),
+    );
+    let result = Engine::new()
+        .with_capture(duhem_runtime::CapturePolicy::Off)
+        .with_browser(browser)
+        .with_store(store.clone())
+        .run_with_metadata(
+            &definition,
+            BTreeMap::from([
+                (
+                    "base_url".into(),
+                    serde_json::json!(format!("http://{}/", fx.addr)),
+                ),
+                ("secret".into(), serde_json::json!("window-secret-663")),
+            ]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.verdict.state, VerdictState::Pass);
+    let trace = duhem_evidence::Trace::from_store(store.as_ref(), &result.run_id)
+        .await
+        .unwrap();
+    let serialized = serde_json::to_string(trace.events()).unwrap();
+    assert!(!serialized.contains("window-secret-663"));
+    assert!(serialized.contains("[redacted:secret]"));
+    let requests = trace
+        .events()
+        .iter()
+        .find_map(|event| match &event.payload {
+            duhem_evidence::EventPayload::StepObservation {
+                output_name,
+                value: duhem_evidence::ObservationValue::Inline { value },
+                ..
+            } if output_name == "requests" => Some(value),
+            _ => None,
+        })
+        .expect("persisted request collection");
+    let requests = requests.as_array().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0]["sequence"].as_u64() < requests[1]["sequence"].as_u64());
+}

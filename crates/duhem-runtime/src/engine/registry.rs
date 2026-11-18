@@ -77,6 +77,15 @@ pub(crate) trait Dispatch: Send + Sync {
         true
     }
 
+    async fn invoke_context(
+        &self,
+        ctx: &ActionCtx<'_>,
+        with: &serde_yml::Value,
+        child_env: &BTreeMap<String, String>,
+    ) -> Result<ActionResult, ActionError> {
+        self.invoke(ctx.page, ctx.step_index, with, child_env).await
+    }
+
     async fn invoke(
         &self,
         page: Option<&Page>,
@@ -91,8 +100,7 @@ pub(crate) trait Dispatch: Send + Sync {
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn invoke_scoped(
     dispatcher: &dyn Dispatch,
-    page: Option<&Page>,
-    index: usize,
+    ctx: &ActionCtx<'_>,
     with: &serde_yml::Value,
     child_env: &BTreeMap<String, String>,
     run: &super::RunState,
@@ -106,7 +114,7 @@ pub(crate) async fn invoke_scoped(
             .invoke(dispatcher.uses(), with, owner, child_env, writer)
             .await
     } else {
-        dispatcher.invoke(page, index, with, child_env).await
+        dispatcher.invoke_context(ctx, with, child_env).await
     }
 }
 
@@ -190,7 +198,20 @@ impl Dispatch for ConcreteAction {
                 self.uses
             )));
         }
-        let ctx = ActionCtx { page, step_index };
+        let ctx = ActionCtx {
+            page,
+            step_index,
+            ..Default::default()
+        };
+        self.invoke_context(&ctx, with, child_env).await
+    }
+
+    async fn invoke_context(
+        &self,
+        ctx: &ActionCtx<'_>,
+        with: &serde_yml::Value,
+        child_env: &BTreeMap<String, String>,
+    ) -> Result<ActionResult, ActionError> {
         // Only `cli/invoke` needs the runtime-owned env layered in, so
         // only it pays for the clone; every other action (the hot
         // UI/API path) invokes against the original `with` by
@@ -198,9 +219,9 @@ impl Dispatch for ConcreteAction {
         if self.uses == "cli/invoke" {
             let mut invocation_with = with.clone();
             inject_child_env(&mut invocation_with, child_env);
-            self.action.invoke(&ctx, &invocation_with).await
+            self.action.invoke(ctx, &invocation_with).await
         } else {
-            self.action.invoke(&ctx, with).await
+            self.action.invoke(ctx, with).await
         }
     }
 }

@@ -67,6 +67,7 @@ async fn history_outputs_report_urls_and_navigated_for_every_entry_kind() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        ..Default::default()
     };
     let none = serde_yml::Value::Null;
     let list = format!("{}/", fx.url);

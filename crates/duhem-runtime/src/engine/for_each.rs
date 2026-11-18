@@ -649,8 +649,11 @@ async fn invoke_and_record(
     };
     let result = crate::engine::registry::invoke_scoped(
         dispatcher,
-        page,
-        idx,
+        &duhem_actions::ActionCtx {
+            page,
+            step_index: idx,
+            ..Default::default()
+        },
         resolved_with,
         child_env,
         run,

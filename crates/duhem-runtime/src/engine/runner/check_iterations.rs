@@ -187,6 +187,9 @@ impl Engine {
                 groups = outer_groups.clone();
                 cleanup = outer_cleanup.clone();
                 for idx in range.clone() {
+                    if let Some(id) = &check.steps[idx].id {
+                        contexts.step_times.remove(id);
+                    }
                     evidence[idx] = StepEvidence::empty();
                 }
                 self.execute_check_steps(

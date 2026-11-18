@@ -1,0 +1,26 @@
+# Worked example for #603 / #663; uses the real runtime browser fixture.
+verification: Request collection evidence
+inputs:
+  base_url: { type: string }
+  secret: { type: string, secret: true }
+criteria:
+  - id: AC-1
+    description: Request evidence preserves traffic without exposing credentials.
+    checks:
+      - id: AC-1.1
+        steps:
+          - id: anchor
+            uses: ui/navigate
+            with: { url: '$runtime.format("{}?token={}", $inputs.base_url, $inputs.secret)' }
+          - id: again
+            uses: ui/navigate
+            with: { url: '$runtime.format("{}?token={}", $inputs.base_url, $inputs.secret)' }
+          - id: observed
+            uses: api/observe
+            with:
+              method: GET
+              url_pattern: 're:token='
+              window: { from_step: anchor, edge: start, duration: 1s }
+        assertions:
+          - $steps.observed.outputs.count == 2
+          - $steps.observed.outputs.complete == true

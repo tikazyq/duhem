@@ -63,6 +63,7 @@ async fn frame_rect_is_frame_relative_and_page_rect_is_not() {
     let ctx = ActionCtx {
         page: Some(&check.page),
         step_index: 0,
+        ..Default::default()
     };
     Navigate
         .invoke(&ctx, &serde_yml::from_str(&format!("url: {url}")).unwrap())

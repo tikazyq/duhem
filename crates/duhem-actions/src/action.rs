@@ -34,6 +34,7 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 /// check; see `browser::CheckBrowser`). The runtime spec extends
 /// this with the expression evaluator and evidence sink — both are
 /// out of scope here so we keep the struct narrow.
+#[derive(Default)]
 pub struct ActionCtx<'a> {
     /// Browser page bound to this check, or `None` for a page-free
     /// step. The engine attaches a page only when the check contains a
@@ -43,6 +44,18 @@ pub struct ActionCtx<'a> {
     /// Zero-based index of the currently-executing step within its
     /// check. Carried for evidence threading downstream.
     pub step_index: usize,
+    /// Selected browser session (None is the unnamed default session).
+    pub session: Option<&'a str>,
+    /// Read-only step boundaries owned by the current check attempt.
+    pub step_times: Option<&'a BTreeMap<String, StepTime>>,
+}
+
+/// Step boundaries measured on the selected browser session's monotonic clock.
+#[derive(Debug, Clone)]
+pub struct StepTime {
+    pub session: Option<String>,
+    pub start_ms: f64,
+    pub finish_ms: f64,
 }
 
 impl<'a> ActionCtx<'a> {
@@ -287,6 +300,7 @@ mod tests {
         let ctx = ActionCtx {
             page: None,
             step_index: 0,
+            ..Default::default()
         };
         assert!(ctx.require_page().is_err());
     }

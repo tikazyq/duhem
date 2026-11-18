@@ -859,6 +859,14 @@ impl Page {
         serde_json::from_value(v).map_err(|e| PwError(format!("pollNetwork decode: {e}")))
     }
 
+    /// Snapshot requests whose starts fall within [start_ms, end_ms).
+    pub async fn request_window(&self, start_ms: f64, end_ms: f64) -> Result<Value, PwError> {
+        let mut req = self.p();
+        req["startMs"] = json!(start_ms);
+        req["endMs"] = json!(end_ms);
+        self.conn.request("requestWindow", req).await
+    }
+
     /// Current position on the per-check monotonic browser-session clock.
     pub async fn session_time_ms(&self) -> Result<f64, PwError> {
         let v = self.conn.request("sessionTime", self.p()).await?;

@@ -252,17 +252,54 @@ impl Engine {
                         Some(Err(error))
                     } else {
                         let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
-                        let result = crate::engine::registry::invoke_scoped(
-                            dispatcher.as_ref(),
-                            page_ref,
-                            idx,
-                            &resolved_with,
-                            &self.child_process_env(writer.run_id()),
-                            ctx.run_state(),
-                            &ctx.run_state().process_owner,
-                            writer,
-                        )
-                        .await;
+                        let start_ms = match page_ref {
+                            Some(page) => Some(page.session_time_ms().await),
+                            None => None,
+                        };
+                        let action_ctx = duhem_actions::ActionCtx {
+                            page: page_ref,
+                            step_index: idx,
+                            session: step.session.as_deref(),
+                            step_times: Some(&contexts.step_times),
+                        };
+                        let result = if let Some(Err(error)) = &start_ms {
+                            Err(duhem_actions::ActionError::Playwright(error.to_string()))
+                        } else {
+                            crate::engine::registry::invoke_scoped(
+                                dispatcher.as_ref(),
+                                &action_ctx,
+                                &resolved_with,
+                                &self.child_process_env(writer.run_id()),
+                                ctx.run_state(),
+                                &ctx.run_state().process_owner,
+                                writer,
+                            )
+                            .await
+                        };
+                        let result = match (start_ms, page_ref, step.id.as_ref()) {
+                            (Some(Ok(start_ms)), Some(page), Some(id)) => {
+                                match page.session_time_ms().await {
+                                    Ok(finish_ms) => {
+                                        contexts.step_times.insert(
+                                            id.clone(),
+                                            duhem_actions::action::StepTime {
+                                                session: step.session.clone(),
+                                                start_ms,
+                                                finish_ms,
+                                            },
+                                        );
+                                        result
+                                    }
+                                    Err(error) => Err(duhem_actions::ActionError::Playwright(
+                                        error.to_string(),
+                                    )),
+                                }
+                            }
+                            (Some(Err(error)), _, _) => {
+                                Err(duhem_actions::ActionError::Playwright(error.to_string()))
+                            }
+                            _ => result,
+                        };
                         if let Ok(r) = &result {
                             crate::engine::secret_output::register(
                                 writer,

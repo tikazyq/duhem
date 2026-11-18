@@ -40,6 +40,13 @@ impl std::fmt::Display for RefSite {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ValidationError {
+    #[error("{site}: api/observe window: {message}")]
+    InvalidObserveWindow {
+        site: String,
+        message: String,
+        location: Option<SourceLocation>,
+    },
+
     #[error("verification has no criteria")]
     NoCriteria,
 
@@ -458,7 +465,8 @@ impl ValidationError {
     /// Exact source position of the offending scalar, when proven.
     pub fn location(&self) -> Option<SourceLocation> {
         match self {
-            Self::InvalidWithExpression { location, .. }
+            Self::InvalidObserveWindow { location, .. }
+            | Self::InvalidWithExpression { location, .. }
             | Self::UnresolvedStepRef { location, .. }
             | Self::UnresolvedStepOutput { location, .. }
             | Self::UnresolvedInputRef { location, .. }
