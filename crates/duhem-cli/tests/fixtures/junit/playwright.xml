@@ -1,0 +1,10 @@
+<testsuites id="" name="" tests="2" failures="0" skipped="1" errors="0" time="1.002">
+  <testsuite name="checkout.spec.ts" timestamp="2026-11-15T00:00:00.000Z" hostname="chromium" tests="2" failures="0" skipped="1" time="1.002" errors="0">
+    <testcase name="cart › adds an item" classname="checkout.spec.ts" time="1.002">
+      <system-out><![CDATA[opened <cart>]]></system-out>
+    </testcase>
+    <testcase name="cart › opens coupon picker" classname="checkout.spec.ts" time="0">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>

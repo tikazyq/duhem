@@ -27,7 +27,11 @@ See [Native runs](../../../../docs/native-runs.md) for the field reference.
 Use unique IDs and argv commands; optional `expect` matches stdout/stderr or sets
 an expected exit code. Required failures block the gate without changing criterion
 verdicts. Native outcomes cannot be referenced from assertions or expressions.
-Report parsing and native selection filters are deferred.
+Use `report: {format: junit, path: results.xml}` when the command writes JUnit
+XML. The path is relative to the command's `cwd`. Failed and errored testcases
+fail the native run even with an expected exit code. A missing or malformed
+report is inconclusive. JUnit counts reflect testcase statuses independently of
+exit and output expectations. Native selection filters are deferred.
 
 ## When to use this skill
 

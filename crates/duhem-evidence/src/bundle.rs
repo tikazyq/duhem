@@ -259,10 +259,15 @@ pub fn referenced_blobs(events: &[Event]) -> Vec<String> {
     for evt in events {
         match &evt.payload {
             EventPayload::NativeRunFinished { result } => {
-                if let Some(sha) = &result.stdout_blob_sha256 {
-                    push(sha);
-                }
-                if let Some(sha) = &result.stderr_blob_sha256 {
+                for sha in [
+                    &result.stdout_blob_sha256,
+                    &result.stderr_blob_sha256,
+                    &result.report_blob_sha256,
+                    &result.results_blob_sha256,
+                ]
+                .into_iter()
+                .flatten()
+                {
                     push(sha);
                 }
             }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite tests="2" failures="1" time="0.007" name="example.org/service" timestamp="2026-11-15T00:00:00Z">
+    <properties><property name="go.version" value="go1.25.0"/></properties>
+    <testcase classname="example.org/service" name="TestRead" time="0.003"></testcase>
+    <testcase classname="example.org/service" name="TestWrite/empty" time="0.004">
+      <failure message="Failed">store_test.go:12: got &quot;busy&quot;</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

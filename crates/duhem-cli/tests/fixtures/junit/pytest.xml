@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="pytest" errors="1" failures="0" skipped="1" tests="3" time="0.020">
+    <testcase classname="tests.test_api" name="test_ok" time="0.010"/>
+    <testcase classname="tests.test_api" name="test_broken_fixture" time="0.010">
+      <error message="fixture &quot;shared&quot; broke">RuntimeError: expected &lt;ready&gt; &amp; found &lt;busy&gt;</error>
+    </testcase>
+    <testcase classname="tests.test_api" name="test_opt_in" time="0.000">
+      <skipped type="pytest.skip" message="requires opt-in">tests/test_api.py:42: requires opt-in</skipped>
+    </testcase>
+  </testsuite>
+</testsuites>

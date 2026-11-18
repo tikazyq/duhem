@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="2" failures="0" errors="0" time="0.171">
+  <testsuite name="example::integration" tests="2" failures="0" errors="0">
+    <testcase name="request_ok" classname="example::integration" time="0.125"/>
+    <testcase name="handles_empty" classname="example::integration" time="0.046"/>
+  </testsuite>
+</testsuites>

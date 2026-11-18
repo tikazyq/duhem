@@ -229,6 +229,34 @@ impl SecretRegistry {
         }
     }
 
+    /// Mask source XML as recorded text, including standard entity spellings
+    /// used by test runners for text and attributes.
+    pub(crate) fn mask_xml(&self, xml: &str) -> MaskedText {
+        let mut registry = self.clone();
+        for (pattern, source) in &self.patterns {
+            let text = pattern
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;");
+            for (double_quote, apostrophe) in [
+                ("\"", "'"),
+                ("&quot;", "'"),
+                ("\"", "&apos;"),
+                ("&quot;", "&apos;"),
+                ("&quot;", "&#x27;"),
+                ("&#34;", "&#39;"),
+            ] {
+                let escaped = text.replace('"', double_quote).replace('\'', apostrophe);
+                registry
+                    .patterns
+                    .entry(escaped)
+                    .or_insert_with(|| source.clone());
+            }
+        }
+        registry.rebuild();
+        registry.mask(xml)
+    }
+
     /// Recursively mask textual leaves of a JSON value. This keeps
     /// structural event fields typed while covering every action-owned
     /// `with:` / output / response string that enters the generic event

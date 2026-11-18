@@ -18,6 +18,26 @@ pub(super) fn write_native(
             run.duration_ms,
             if run.required { "" } else { ", diagnostic" }
         )?;
+        if let Some(counts) = run.counts {
+            writeln!(
+                out,
+                "    {} tests: {} passed, {} failed, {} errored, {} skipped",
+                run.tests, counts.passed, counts.failed, counts.errored, counts.skipped
+            )?;
+            for test in &run.failing_tests {
+                let status = if test.status == duhem_summary::NativeTestStatus::Errored {
+                    "error"
+                } else {
+                    "failure"
+                };
+                writeln!(out, "    {status}: {}", test.id)?;
+                if let Some(message) = &test.message {
+                    for line in message.lines() {
+                        writeln!(out, "      {line}")?;
+                    }
+                }
+            }
+        }
         if let Some(detail) = &run.detail {
             for line in detail.lines() {
                 writeln!(out, "    {line}")?;

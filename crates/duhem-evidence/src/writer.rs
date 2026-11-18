@@ -368,7 +368,42 @@ impl EvidenceWriter {
             .read()
             .expect("secret registry lock poisoned")
             .mask_bytes(bytes);
-        let sha = self.shared.store.put_blob(&masked).await?;
+        self.store_masked_blob(&masked, counts).await
+    }
+
+    /// Store UTF-8 XML source with literal and XML-escaped secrets masked.
+    pub async fn write_xml_blob(&mut self, xml: &str) -> Result<Sha256Hex, WriterError> {
+        let masked = self
+            .shared
+            .secrets
+            .read()
+            .expect("secret registry lock poisoned")
+            .mask_xml(xml);
+        self.store_masked_blob(masked.text.as_bytes(), masked.counts)
+            .await
+    }
+
+    /// Mask values before encoding so a redaction cannot change JSON syntax.
+    pub async fn write_json_blob(
+        &mut self,
+        mut value: serde_json::Value,
+    ) -> Result<Sha256Hex, WriterError> {
+        let counts = self
+            .shared
+            .secrets
+            .read()
+            .expect("secret registry lock poisoned")
+            .mask_json(&mut value);
+        self.store_masked_blob(value.to_string().as_bytes(), counts)
+            .await
+    }
+
+    async fn store_masked_blob(
+        &mut self,
+        masked: &[u8],
+        counts: BTreeMap<String, u64>,
+    ) -> Result<Sha256Hex, WriterError> {
+        let sha = self.shared.store.put_blob(masked).await?;
         if !counts.is_empty() {
             self.shared
                 .artifact_mask_counts

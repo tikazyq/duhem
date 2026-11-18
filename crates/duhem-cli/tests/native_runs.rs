@@ -2,6 +2,9 @@
 #![cfg(unix)]
 use std::process::Command;
 
+#[path = "native_runs/junit.rs"]
+mod junit;
+
 const BODY: &str = "criteria:\n  - id: AC\n    description: Independent body\n    checks:\n      - id: body\n        assertions: ['true']\n";
 
 fn execute(native: &str, manifest: bool) -> (bool, serde_json::Value, tempfile::TempDir) {
@@ -80,6 +83,15 @@ fn exit_codes_output_matching_timeout_and_spawn_failure() {
         assert_eq!(passed, success, "{json}");
         assert_eq!(json["native"][0]["outcome"], outcome);
         assert_eq!(json["native"][0]["tests"], 1);
+        for field in [
+            "counts",
+            "report_path",
+            "report_blob_sha256",
+            "results_blob_sha256",
+            "failing_tests",
+        ] {
+            assert!(json["native"][0].get(field).is_none(), "{json}");
+        }
         assert_eq!(json["criteria"][0]["verdict"], "pass");
         assert!(json["native"][0]["duration_ms"].is_number());
         if !success {

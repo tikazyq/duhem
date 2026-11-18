@@ -7,9 +7,11 @@ use duhem_actions::{Action, ActionCtx, Invoke, Outcome};
 use duhem_evidence::{EventPayload, EvidenceWriter};
 use duhem_judge::{InconclusiveCause, VerdictState};
 use duhem_schema::{NativeOutputExpect, NativeRun};
-use duhem_summary::NativeRunSummary;
+use duhem_summary::{NativeRunSummary, NativeTestCounts, NativeTestStatus};
 
 use super::EngineError;
+
+mod junit;
 
 /// Native suites (cargo test, pytest, Playwright) run for minutes, so the
 /// 5-second `cli/invoke` default does not apply; this only guards hangs.
@@ -54,11 +56,19 @@ pub(crate) async fn run_native(
             outcome: VerdictState::Pass,
             duration_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
             required: run.required,
-            tests: 1,
+            tests: u32::from(run.report.is_none()),
             exit_code: None,
             detail: None,
             stdout_blob_sha256: None,
             stderr_blob_sha256: None,
+            counts: None,
+            report_path: run
+                .report
+                .as_ref()
+                .map(|report| writer.mask_text(&report.path)),
+            report_blob_sha256: None,
+            results_blob_sha256: None,
+            failing_tests: Vec::new(),
         };
         match executed {
             Err(error) => {
@@ -108,6 +118,17 @@ pub(crate) async fn run_native(
                         tail(stderr)
                     )));
                 }
+                if let Some(report) = &run.report
+                    && let Err(detail) =
+                        read_report(writer, &cwd.join(&report.path), &run.id, &mut result).await?
+                {
+                    result.outcome =
+                        VerdictState::Inconclusive(InconclusiveCause::EnvironmentError);
+                    result.detail = Some(match result.detail.take() {
+                        Some(command_detail) => format!("{detail}\n{command_detail}"),
+                        None => detail,
+                    });
+                }
             }
         }
         writer
@@ -118,6 +139,55 @@ pub(crate) async fn run_native(
         results.push(result);
     }
     Ok(results)
+}
+
+async fn read_report(
+    writer: &mut EvidenceWriter,
+    path: &Path,
+    native_id: &str,
+    summary: &mut NativeRunSummary,
+) -> Result<Result<(), String>, EngineError> {
+    let xml = match tokio::fs::read_to_string(path).await {
+        Ok(xml) => xml,
+        Err(error) => {
+            return Ok(Err(
+                writer.mask_text(&format!("could not read JUnit report: {error}"))
+            ));
+        }
+    };
+    summary.report_blob_sha256 = Some(writer.write_xml_blob(&xml).await?.0);
+    let tests = match junit::parse(&xml, native_id) {
+        Ok(tests) => tests,
+        Err(error) => {
+            return Ok(Err(
+                writer.mask_text(&format!("invalid JUnit report: {error}"))
+            ));
+        }
+    };
+    summary.results_blob_sha256 = Some(writer.write_json_blob(serde_json::json!(tests)).await?.0);
+    let mut counts = NativeTestCounts::default();
+    summary.tests = tests.len() as u32;
+    for mut test in tests {
+        match test.status {
+            NativeTestStatus::Passed => counts.passed += 1,
+            NativeTestStatus::Failed => counts.failed += 1,
+            NativeTestStatus::Errored => counts.errored += 1,
+            NativeTestStatus::Skipped => counts.skipped += 1,
+        }
+        if test.status.is_failure() && summary.failing_tests.len() < 10 {
+            test.id = writer.mask_text(&test.id);
+            test.file = test.file.map(|file| writer.mask_text(&file));
+            test.message = test
+                .message
+                .map(|message| writer.mask_text(&message).chars().take(2048).collect());
+            summary.failing_tests.push(test);
+        }
+    }
+    if counts.failed != 0 || counts.errored != 0 {
+        summary.outcome = VerdictState::Fail;
+    }
+    summary.counts = Some(counts);
+    Ok(Ok(()))
 }
 
 fn tail(text: &str) -> String {

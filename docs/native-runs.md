@@ -33,10 +33,43 @@ and stderr; the full masked output is stored as evidence blobs.
 a regex match and `not_matches` forbids one, independently for stdout and stderr.
 Patterns use the same Rust regex semantics as `matches:` assertions.
 
-A matching exit code and all output expectations produce `pass`; an unexpected
-exit or output produces `fail`. Timeout and spawn failures produce `inconclusive`.
-Every command counts as one test. Output is recorded as masked evidence blobs;
-failure details are masked in JSON and terminal reports.
+Without `report`, a command counts as one test. A matching exit code and output
+produce `pass`. An unexpected exit or output produces `fail`. Timeout and spawn
+failures produce `inconclusive`. Evidence blobs and failure details are masked.
+
+## JUnit reports
+
+Configure the command to write a fresh UTF-8 JUnit XML report on each run. Set
+`report: {format: junit, path: ...}` using a path relative to the command's
+`cwd`. This worked leaf VD runs pytest as a gate alongside an independent check:
+
+```yaml
+verification: service-contract
+native:
+  - id: python-tests
+    layer: unit
+    cwd: ..
+    command: [pytest, --junitxml=pytest-results.xml]
+    report: {format: junit, path: pytest-results.xml}
+criteria:
+  - id: readiness
+    description: The running service exposes a successful health response.
+    checks:
+      - id: health-response
+        steps:
+          - id: health
+            uses: api/call
+            with: {url: 'http://localhost:8080/health', method: GET}
+        assertions: ['$steps.health.outputs.status == 200']
+```
+
+Duhem reads JUnit reports from nextest, pytest, jest-junit, Playwright and
+go-junit-report. A missing, unreadable or malformed report makes the native run
+`inconclusive`, as does a timeout. With a parsed report, any failed or errored
+testcase, unexpected exit code, or unmatched output expectation fails the run.
+Skipped tests do not fail the run. Counts come from individual testcase records,
+so a command that exits unexpectedly after passing tests still reports those tests
+as passed. Validation rejects `format: ctrf` with `ctrf not yet supported`.
 
 Required commands that fail or are inconclusive block the overall run and return
 a nonzero CLI exit. `required: false` keeps the outcome visible and counted while
@@ -49,6 +82,10 @@ required status, exit code, failure detail, and output blob addresses. `layers`
 contains test counts and durations per native layer, plus a `duhem` row for checks.
 These fields are omitted when no native commands ran.
 
-Report parsing will follow in a later release. `report: {format: junit, path: ...}`
-and `report: {format: ctrf, path: ...}` are recognized shapes, but validation currently
-rejects both with `report parsing not yet supported`. No report is silently ignored.
+JUnit runs record `report_path`, `report_blob_sha256` for the masked source XML,
+and `results_blob_sha256` for the full normalized, masked JSON array. Each result
+has an `id` composed of the native ID, classname, and testcase name, a `status`,
+and `duration_ms`, `file`, and `message` when supplied. Parsed reports add `counts`
+with `passed`, `failed`, `errored`, and `skipped`. Layer totals include nonzero
+`errored` and `skipped` counts. JSON and terminal summaries show up to ten failed
+or errored tests, with each message limited to 2,048 characters.
