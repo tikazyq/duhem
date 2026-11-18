@@ -109,8 +109,8 @@ function renderBand(detail: RunDetail, props: { collapsed?: boolean } = {}) {
 
 it("shows aborted runs with their recorded engine error and no verdict", () => {
   renderBand(run({ status: "aborted", verdict: null, error: "unresolved reference: [redacted:token]" }));
-  expect(screen.getByTestId("verdict-word")).toHaveTextContent("Aborted");
-  expect(screen.getByTestId("run-error")).toHaveTextContent("unresolved reference: [redacted:token]");
+  expect(screen.getByTestId("verdict-word").textContent).toBe("Aborted");
+  expect(screen.getByTestId("run-error").textContent).toBe("unresolved reference: [redacted:token]");
 });
 
 // Mirrors the self-verification VD's `{role: heading, text: pass}`:

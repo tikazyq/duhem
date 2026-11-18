@@ -242,7 +242,7 @@ async fn auto_send_continues_after_a_rejected_nested_run() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn auto_send_skips_an_unfinished_nested_engine_error() {
+async fn auto_send_delivers_a_sealed_nested_engine_error() {
     let tmp = tempfile::tempdir().unwrap();
     let child = tmp.path().join("child.yml");
     std::fs::write(&child, "verification: unfinished\ncriteria:\n  - id: A\n    description: engine error\n    checks:\n      - id: a\n        steps:\n          - id: missing\n            uses: cli/invoke\n            if: failure\n            with: {command: ['true']}\n          - id: error\n            uses: cli/invoke\n            with: {command: [sh, -c, $steps.missing.outputs.stdout]}\n        assertions: ['true']\n").unwrap();
@@ -255,26 +255,23 @@ async fn auto_send_skips_an_unfinished_nested_engine_error() {
         .env("DUHEM_SERVER_TOKEN", "test-token")
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("warning: auto-send: sent 1 of 2 runs; skipped 1 unfinished"),
-        "{stderr}"
-    );
-    assert_eq!(
-        stderr
-            .lines()
-            .filter(|line| line.starts_with("warning: auto-send:"))
-            .count(),
-        1
-    );
-    assert_eq!(remote.list_runs().await.unwrap().len(), 1);
+    assert_pass(&output);
+    let remote_runs = remote.list_runs().await.unwrap();
+    assert_eq!(remote_runs.len(), 2);
+    let aborted = remote_runs
+        .iter()
+        .find(|run| run.status == duhem_evidence::RunStatus::Aborted)
+        .expect("nested engine error was delivered as aborted");
+    assert_eq!(aborted.verdict, None);
+    assert!(aborted.lineage.parent_run_id.is_some());
+    let events = remote.run_events(&aborted.run_id).await.unwrap();
+    assert!(matches!(events.last().map(|event| &event.payload),
+        Some(duhem_evidence::EventPayload::RunAborted { signal, error: Some(error) })
+            if signal == "engine_error" && error.contains("$steps.missing.outputs.stdout")
+    ));
     let local = SqliteStore::open_read_only(db).await.unwrap();
     assert_eq!(local.list_runs().await.unwrap().len(), 2);
+    assert_eq!(local.run_events(&aborted.run_id).await.unwrap(), events);
     task.abort();
 }
 
