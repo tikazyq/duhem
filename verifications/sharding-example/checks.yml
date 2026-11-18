@@ -1,0 +1,30 @@
+verification: Git CLI smoke checks
+criteria:
+  - id: VERSION
+    description: Git reports its installed version.
+    checks:
+      - id: VERSION.1
+        steps:
+          - id: version
+            uses: cli/invoke
+            with: {command: [git, --version]}
+        assertions:
+          - $steps.version.outputs.exit_code == 0
+          - matches: {value: $steps.version.outputs.stdout, pattern: '^git version '}
+      - id: VERSION.2
+        steps:
+          - id: version
+            uses: cli/invoke
+            with: {command: [git, version]}
+        assertions:
+          - matches: {value: $steps.version.outputs.stdout, pattern: '^git version '}
+  - id: OPTIONS
+    description: Git processes more than one global option.
+    checks:
+      - id: OPTIONS.1
+        steps:
+          - id: version
+            uses: cli/invoke
+            with: {command: [git, --no-pager, --version]}
+        assertions:
+          - $steps.version.outputs.exit_code == 0

@@ -556,6 +556,7 @@ async fn child_run_records_lineage_with_fk_and_remains_append_only() {
     let lineage = RunLineage {
         parent_run_id: Some(parent_id.to_string()),
         origin: Some(RunOrigin::Suite),
+        shard: None,
     };
     let mut child = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
         store.clone(),
@@ -608,6 +609,7 @@ async fn child_run_records_lineage_with_fk_and_remains_append_only() {
         RunLineage {
             parent_run_id: Some("01MISSING".to_string()),
             origin: Some(RunOrigin::Suite),
+            shard: None,
         },
         SecretRegistry::new(),
     )

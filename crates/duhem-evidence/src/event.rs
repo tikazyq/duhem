@@ -86,6 +86,7 @@ pub enum RunStatus {
 pub enum RunOrigin {
     Suite,
     Invocation,
+    Shard,
 }
 
 /// Outcome of a single step invocation. Distinct from a verdict —
@@ -233,6 +234,8 @@ pub enum EventPayload {
         /// Why this child exists. Root and pre-lineage runs omit it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         origin: Option<RunOrigin>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shard: Option<crate::ShardPlan>,
         /// Snapshot of the Verification Definition source (raw YAML) as
         /// it was when this run was judged (spec #302). Makes a run
         /// self-describing — the criteria/check descriptions, step ids,
@@ -587,6 +590,7 @@ mod tests {
                 schema_version: SCHEMA_VERSION.into(),
                 parent_run_id: None,
                 origin: None,
+                shard: None,
                 definition: None,
                 viewport: None,
             },

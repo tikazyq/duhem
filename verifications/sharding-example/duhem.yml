@@ -1,0 +1,11 @@
+# Run both shards from the repository root (#663):
+#   duhem run -f verifications/sharding-example/duhem.yml --shard 1/2
+#   duhem run -f verifications/sharding-example/duhem.yml --shard 2/2
+manifest_version: 1
+verifications:
+  - path: checks.yml
+native:
+  - id: git-version
+    command: [git, --version]
+    expect:
+      stdout: {matches: '^git version '}

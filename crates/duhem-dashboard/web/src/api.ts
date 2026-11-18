@@ -19,7 +19,7 @@ export interface RunsListEntry {
   kind: "leaf" | "run-set";
   status: RunStatus;
   parent_run_id?: string;
-  origin?: "suite" | "invocation";
+  origin?: "suite" | "invocation" | "shard";
   children?: RunsListEntry[];
 }
 

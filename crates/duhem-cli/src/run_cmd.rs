@@ -27,11 +27,12 @@ use crate::profile;
 use crate::reporter::{self, Reporter};
 use crate::resolve::{render_input_value, resolve_leaf_inputs};
 use crate::run_scope::Scope;
+use crate::sharding::{self, ShardSettings};
 
 /// One validated leaf after all input precedence layers have resolved.
 /// Kept as an alias because the surrounding execution loop benefits from
 /// tuple destructuring while the secret registry remains leaf-scoped.
-type ResolvedLeaf = (
+pub(crate) type ResolvedLeaf = (
     String,
     PathBuf,
     VerificationDefinition,
@@ -48,6 +49,7 @@ pub struct RunArgs {
     pub filter: Vec<String>,
     pub db: Option<PathBuf>,
     pub run_id: Option<String>,
+    pub shard: Option<String>,
     pub reporter: Reporter,
     pub profile: Option<String>,
     pub dry_run: bool,
@@ -74,6 +76,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         filter: raw_filter,
         db,
         run_id: pinned_run_id,
+        shard,
         reporter,
         profile: requested_profile,
         dry_run,
@@ -85,6 +88,14 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         capture_video,
         viewport: viewport_override,
     } = args;
+    let shard_settings = match ShardSettings::resolve(shard.as_deref(), pinned_run_id.as_deref()) {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let pinned_run_id = pinned_run_id.filter(|_| shard_settings.is_none());
 
     // Live progress posture (#299), resolved once: forced by
     // `--live`/`--no-live`, else on iff stderr is a terminal (a piped
@@ -163,7 +174,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         if let Loaded::Manifest { leaves, .. } = &loaded {
             authored_leaf_paths = leaves.iter().map(|leaf| leaf.path.clone()).collect();
         }
-        if let Some(directory) = &directory_filter {
+        if let Some(directory) = &directory_filter
+            && !(shard_settings.is_some() && authored_leaf_paths.is_empty())
+        {
             return filter_loaded_to_directory(loaded, directory);
         }
         Ok(loaded)
@@ -213,6 +226,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // is no manifest, so nothing is selected; a `--profile` passed
     // there is inert (warned below).
     let mut selected_profile: Option<profile::SelectedProfile> = None;
+    let mut manifest_digest = None;
     let (leaves, scope): (Vec<LoadedLeaf>, Scope) = match loaded {
         Loaded::Leaf { path, definition } => {
             if requested_profile.is_some() {
@@ -238,6 +252,15 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 Err(e) => {
                     eprintln!("{e}");
                     return ExitCode::FAILURE;
+                }
+            }
+            if shard_settings.is_some() {
+                match sharding::manifest_digest(&manifest) {
+                    Ok(digest) => manifest_digest = Some(digest),
+                    Err(error) => {
+                        eprintln!("shard plan: {error}");
+                        return ExitCode::FAILURE;
+                    }
                 }
             }
             let manifest_dir = manifest_path.parent().map(Path::to_path_buf);
@@ -378,6 +401,57 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         ));
     }
 
+    let mut suite_secrets = BTreeMap::new();
+    if is_manifest && !dry_run {
+        for (_, _, definition, values, _) in &resolved {
+            for (name, declaration) in &definition.inputs {
+                if (declaration.secret
+                    || (declaration.inherit
+                        && manifest_inputs.get(name).is_some_and(|input| input.secret)))
+                    && let Some(value) = values.get(name)
+                {
+                    suite_secrets.insert(name.clone(), value.clone());
+                }
+            }
+        }
+    }
+    let shard_manifest = match &scope {
+        Scope::Manifest {
+            manifest_dir,
+            native,
+            ..
+        } => manifest_digest.as_deref().map(|digest| {
+            (
+                digest,
+                manifest_dir.as_deref().unwrap_or(Path::new("")),
+                native.as_slice(),
+            )
+        }),
+        Scope::SingleLeaf => None,
+    };
+    let (shard_lineage, shard_native) = match shard_settings {
+        Some(settings) => match sharding::partition(
+            settings,
+            &target,
+            shard_manifest,
+            check_filter.as_ref(),
+            selected_profile
+                .as_ref()
+                .map(|profile| profile.name.as_str()),
+            &mut resolved,
+        ) {
+            Ok((lineage, native)) => (Some(lineage), native),
+            Err(error) => {
+                eprintln!("shard plan: {error}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => (None, Vec::new()),
+    };
+    let is_sharded = shard_lineage.is_some();
+    // The shard's definitions are already narrowed by the filter and partition.
+    let filter_for_execution = check_filter.as_ref().filter(|_| !is_sharded);
+
     // `--dry-run` short-circuits before any browser launch: print the
     // resolved `(criterion::check)` plan (qualified with the
     // verification name on manifest runs) and exit 0.
@@ -400,8 +474,24 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
         let mut stdout = std::io::stdout().lock();
         let mut wrote = false;
+        if let Some(plan) = shard_lineage
+            .as_ref()
+            .and_then(|lineage| lineage.shard.as_ref())
+        {
+            if let Err(error) = writeln!(stdout, "SHARD: {}/{}", plan.index, plan.total) {
+                eprintln!("dry-run: {error}");
+                return ExitCode::FAILURE;
+            }
+            for run in &shard_native {
+                if let Err(error) = writeln!(stdout, "WOULD RUN NATIVE: {}", run.id) {
+                    eprintln!("dry-run: {error}");
+                    return ExitCode::FAILURE;
+                }
+                wrote = true;
+            }
+        }
         for (name, _path, def, _inputs, _secrets) in &resolved {
-            let leaf_filter = check_filter.as_ref().and_then(|f| {
+            let leaf_filter = filter_for_execution.and_then(|f| {
                 if f.has_criterion_filters() {
                     f.for_verification(name)
                 } else {
@@ -410,7 +500,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             });
             // If a filter was passed and nothing scopes to this leaf,
             // skip — no spurious "no checks matched" line per-leaf.
-            if check_filter.is_some() && leaf_filter.is_none() {
+            if filter_for_execution.is_some() && leaf_filter.is_none() {
                 continue;
             }
             for criterion in &def.criteria {
@@ -438,7 +528,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
             }
         }
         for (name, _path, definition, _inputs, _secrets) in &resolved {
-            let (selected, excluded) = native_selection(check_filter.as_ref(), &definition.native);
+            let (selected, excluded) = native_selection(filter_for_execution, &definition.native);
             for run in selected {
                 let line = if is_manifest {
                     format!("WOULD RUN NATIVE: {name}::{}", run.id)
@@ -472,14 +562,14 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // `WOULD RUN` lines. Values render deterministically (strings
         // bare, other types as compact JSON of the coerced value).
         for (name, _path, _def, inputs, secrets) in &resolved {
-            let leaf_filter = check_filter.as_ref().and_then(|f| {
+            let leaf_filter = filter_for_execution.and_then(|f| {
                 if f.has_criterion_filters() {
                     f.for_verification(name)
                 } else {
                     Some(CliCheckFilter::matches_nothing())
                 }
             });
-            if check_filter.is_some() && leaf_filter.is_none() {
+            if filter_for_execution.is_some() && leaf_filter.is_none() {
                 continue;
             }
             if inputs.is_empty() {
@@ -566,25 +656,42 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     let mut inherited_scope: Option<RunScope> = invocation_parent
         .as_ref()
         .map(|parent| parent.scope.clone());
-    if let Scope::Manifest {
-        provision: environment,
-        native,
-        manifest_dir,
-        ..
-    } = &scope
-    {
+    if is_manifest || is_sharded {
+        let (mut environment, native, suite_dir, project) = match &scope {
+            Scope::Manifest {
+                provision,
+                native,
+                manifest_dir,
+                ..
+            } => (
+                provision.as_ref(),
+                native.as_slice(),
+                manifest_dir.as_deref(),
+                manifest_project.as_ref(),
+            ),
+            Scope::SingleLeaf => (
+                None,
+                &[][..],
+                target.parent(),
+                leaves[0].definition.project.as_ref(),
+            ),
+        };
+        if is_sharded && resolved.is_empty() && shard_native.is_empty() {
+            environment = None;
+        }
         let suite_scope = inherited_scope.clone().unwrap_or_else(|| {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            duhem_runtime::resolve_scope(manifest_project.as_ref(), &cwd, manifest_dir.as_deref())
+            duhem_runtime::resolve_scope(project, &cwd, suite_dir)
         });
         inherited_scope = Some(suite_scope.clone());
-        let suite_lineage = match &invocation_parent {
+        let suite_lineage = shard_lineage.unwrap_or_else(|| match &invocation_parent {
             Some(parent) => RunLineage {
                 parent_run_id: Some(parent.run_id.clone()),
                 origin: Some(RunOrigin::Invocation),
+                shard: None,
             },
             None => RunLineage::default(),
-        };
+        });
         let suite_run_id = duhem_evidence::new_run_id();
         suite_parent_id = Some(suite_run_id.clone());
         if let Some(base) = dashboard_base.as_deref() {
@@ -601,9 +708,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         let suite_definition_path = target.to_string_lossy().into_owned();
         let provision = SuiteEnvironment::provision(
             SuiteRunConfig {
-                environment: environment.as_ref(),
+                environment,
                 definition_path: &suite_definition_path,
-                manifest_dir: manifest_dir.as_deref(),
+                manifest_dir: suite_dir,
                 run_id: suite_run_id.clone(),
                 scope: suite_scope,
                 lineage: suite_lineage,
@@ -640,19 +747,11 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                     let _ = tear_down_suite(session, keep_env, &mut suite_progress).await;
                     return ExitCode::FAILURE;
                 }
-                let mut suite_secrets = BTreeMap::new();
-                for (_, _, definition, values, _) in &resolved {
-                    for (name, declaration) in &definition.inputs {
-                        if (declaration.secret
-                            || (declaration.inherit
-                                && manifest_inputs.get(name).is_some_and(|input| input.secret)))
-                            && let Some(value) = values.get(name)
-                        {
-                            suite_secrets.insert(name.clone(), value.clone());
-                        }
-                    }
-                }
-                let (selected_native, _) = native_selection(check_filter.as_ref(), native);
+                let selected_native = if is_sharded {
+                    shard_native
+                } else {
+                    native_selection(filter_for_execution, native).0
+                };
                 suite_native = match session.run_native(&selected_native, &suite_secrets).await {
                     Ok(results) => results,
                     Err(error) => {
@@ -697,19 +796,18 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // with `--dry-run` which already prints
         // `(no checks matched filter)` for the same case.
         let (selected_leaf_native, excluded_leaf_native) =
-            native_selection(check_filter.as_ref(), &def.native);
-        let native_only_vacuous = check_filter.as_ref().is_some_and(|filter| {
-            !filter.has_criterion_filters()
-                && (!selected_leaf_native.is_empty() || !suite_native.is_empty())
-        });
+            native_selection(filter_for_execution, &def.native);
+        let native_only_vacuous = (is_sharded && def.criteria.is_empty())
+            || filter_for_execution.is_some_and(|filter| {
+                !filter.has_criterion_filters()
+                    && (!selected_leaf_native.is_empty() || !suite_native.is_empty())
+            });
         let mut def = def;
         def.native = selected_leaf_native;
-        let run_leaf_native = check_filter.is_none()
-            || check_filter
-                .as_ref()
-                .is_some_and(CliCheckFilter::has_native_filters);
+        let run_leaf_native = filter_for_execution.is_none()
+            || filter_for_execution.is_some_and(CliCheckFilter::has_native_filters);
 
-        let leaf_filter = match check_filter.as_ref() {
+        let leaf_filter = match filter_for_execution {
             Some(f) if !f.has_criterion_filters() => Some(CliCheckFilter::matches_nothing()),
             Some(f) => {
                 let criteria_filter = f.for_criteria().expect("criterion filter exists");
@@ -863,6 +961,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 .with_lineage(RunLineage {
                     parent_run_id: Some(parent_run_id.clone()),
                     origin: Some(RunOrigin::Suite),
+                    shard: None,
                 });
         } else if let Some(parent) = invocation_parent.as_ref() {
             engine = engine
@@ -870,6 +969,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 .with_lineage(RunLineage {
                     parent_run_id: Some(parent.run_id.clone()),
                     origin: Some(RunOrigin::Invocation),
+                    shard: None,
                 });
         } else {
             let declared = def.project.as_ref().or(manifest_project.as_ref());
@@ -957,7 +1057,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     //   (issue #49: "default no-op so existing reporters compile
     //   unchanged"); the set-level summary is the CLI's own concern.
     let mut stdout = std::io::stdout().lock();
-    if !is_manifest {
+    if !is_manifest && !is_sharded {
         let (_, outcome) = &leaf_outcomes[0];
         if let Err(e) = reporter::render(
             &reporter,
@@ -986,6 +1086,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         .map(|(_, o)| o.verdict.clone())
         .collect();
     let mut set_verdict = aggregate_run_set(run_verdicts);
+    if is_sharded && leaf_outcomes.is_empty() {
+        set_verdict.state = VerdictState::Pass;
+    }
     set_verdict.state = duhem_judge::native_gate(
         set_verdict.state,
         suite_native.iter().map(|run| (run.required, run.outcome)),

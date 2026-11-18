@@ -265,6 +265,7 @@ async fn parent_run_detail_lists_direct_children_and_tree_verdict() {
         RunLineage {
             parent_run_id: Some(ROOT.to_string()),
             origin: Some(RunOrigin::Suite),
+            shard: None,
         },
     )
     .await;
@@ -294,6 +295,7 @@ async fn parent_envelope_lists_descendant_failure_with_provenance() {
         RunLineage {
             parent_run_id: Some(ROOT.to_string()),
             origin: Some(RunOrigin::Suite),
+            shard: None,
         },
     )
     .await;
@@ -305,6 +307,7 @@ async fn parent_envelope_lists_descendant_failure_with_provenance() {
         RunLineage {
             parent_run_id: Some(ROOT.to_string()),
             origin: Some(RunOrigin::Suite),
+            shard: None,
         },
     )
     .await;
@@ -345,6 +348,7 @@ async fn nested_invocation_child_is_not_part_of_the_tree() {
         RunLineage {
             parent_run_id: Some(LEAF.to_string()),
             origin: Some(RunOrigin::Invocation),
+            shard: None,
         },
     )
     .await;
@@ -373,6 +377,7 @@ async fn passing_parent_tree_has_no_failing_checks() {
         RunLineage {
             parent_run_id: Some(ROOT.to_string()),
             origin: Some(RunOrigin::Suite),
+            shard: None,
         },
     )
     .await;

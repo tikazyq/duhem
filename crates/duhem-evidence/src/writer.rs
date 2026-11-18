@@ -47,6 +47,11 @@ pub enum WriterError {
 pub struct Sha256Hex(pub String);
 
 impl Sha256Hex {
+    pub fn of(bytes: &[u8]) -> Self {
+        use sha2::{Digest, Sha256};
+        Self(hex::encode(Sha256::digest(bytes)))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -550,6 +555,7 @@ pub fn run_started_with_viewport(
         schema_version: SCHEMA_VERSION.to_string(),
         parent_run_id: lineage.parent_run_id,
         origin: lineage.origin,
+        shard: lineage.shard,
         definition,
         viewport,
     }
@@ -617,6 +623,7 @@ mod tests {
         let lineage = RunLineage {
             parent_run_id: Some(secret.to_string()),
             origin: Some(crate::RunOrigin::Invocation),
+            shard: None,
         };
         let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
             store.clone(),

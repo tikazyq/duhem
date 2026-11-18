@@ -102,6 +102,7 @@ pub struct RunScope {
 pub struct RunLineage {
     pub parent_run_id: Option<String>,
     pub origin: Option<RunOrigin>,
+    pub shard: Option<crate::ShardPlan>,
 }
 
 /// One run as the store knows it: runtime lifecycle and judge verdict

@@ -27,7 +27,10 @@ pub mod replay;
 mod replay_process;
 pub mod secret;
 pub mod session;
+mod shard;
 pub mod store;
+
+pub use shard::{ShardAssignment, ShardPlan, ShardUnit};
 pub mod writer;
 
 pub use bundle::{BUNDLE_VERSION, BundleArtifact, BundleRun, RunBundle};

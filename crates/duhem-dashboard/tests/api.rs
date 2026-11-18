@@ -208,6 +208,7 @@ async fn runs_list_nests_recorded_suite_and_invocation_children() {
         RunLineage {
             parent_run_id: Some(root_id.to_string()),
             origin: Some(RunOrigin::Suite),
+            shard: None,
         },
     )
     .await;
@@ -218,6 +219,7 @@ async fn runs_list_nests_recorded_suite_and_invocation_children() {
         RunLineage {
             parent_run_id: Some(suite_id.to_string()),
             origin: Some(RunOrigin::Invocation),
+            shard: None,
         },
     )
     .await;

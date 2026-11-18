@@ -196,6 +196,43 @@ invocation; `DUHEM_OPENER` overrides the platform opener).
 
 
 
+### Split a run across CI jobs
+
+Run the same manifest or leaf, with the same filters and profile, on each job.
+Give each job a different one-based shard number:
+
+```sh
+duhem run -f verifications/sharding-example/duhem.yml --shard 1/2
+duhem run -f verifications/sharding-example/duhem.yml --shard 2/2
+```
+
+Use `--dry-run` to see what a shard will execute without creating a database.
+Filters apply first. Selected checks under one criterion stay together, and
+native commands are assigned individually. Each job provisions its own
+required environment and records its own run ID, the shared parent ID and the
+complete partition plan. An empty shard records a plan but starts no work.
+Sharded JSON reports use the run-set shape, even for a single leaf.
+
+`--shard` overrides `DUHEM_SHARD`, which overrides automatic detection on
+GitLab CI, Buildkite and CircleCI. `--run-id` overrides `DUHEM_RUN_ID` to set the
+shared parent ID. Without an explicit ID, Duhem derives one from the plan and,
+when it detects a CI shard, that provider's pipeline and job identity. Pass a
+shared ID unique to each attempt if you rerun an identical plan outside those
+providers. See [distributed runs](duhem-spec.md#distributed-runs) for the
+provider variables.
+
+For GitHub Actions, map the matrix contexts in your run step. GitHub's index
+is zero-based, so add one before passing it to Duhem:
+
+```yaml
+env:
+  JOB_INDEX: ${{ strategy.job-index }}
+  JOB_TOTAL: ${{ strategy.job-total }}
+  DUHEM_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+shell: bash
+run: DUHEM_SHARD="$((JOB_INDEX + 1))/$JOB_TOTAL" duhem run
+```
+
 ### Report definitions with no recorded run
 
 `duhem coverage verifications --db /path/to/existing/duhem.db --base .` lists each

@@ -28,6 +28,9 @@ controls against the same project. Self-verification CI runs the example and
 controls. The [Rust verification](duhem-rust/duhem.yml) wraps CI's existing
 `cargo test --workspace` invocation in a required native gate. (#649)
 
+The [sharding example](sharding-example/duhem.yml) divides criteria and a native
+command between two CI jobs, keeping all checks in each criterion together. (#663)
+
 The [per-row validation example](for-each-rows-example/duhem.yml) applies
 the same assertions to every row with bounded `for_each:` (#521).
 

@@ -112,8 +112,8 @@ impl EvidenceReader {
         Ok(Some(RunEvidence { record, events }))
     }
 
-    /// `GET /api/runs`: a recorded-lineage tree. Top-level rows have
-    /// no parent; every descendant is nested under its recorded parent.
+    /// `GET /api/runs`: a recorded-lineage tree. Shards appear at the
+    /// top level when their logical parent is not in the local store.
     pub async fn list(&self) -> Result<Vec<RunsListEntry>, ReaderError> {
         let records = self.store.list_runs().await?;
         let by_id: BTreeMap<&str, &RunRecord> = records
@@ -122,7 +122,9 @@ impl EvidenceReader {
             .collect();
         let mut child_ids: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for record in &records {
-            if let Some(parent) = record.lineage.parent_run_id.as_deref() {
+            if record.lineage.shard.is_none()
+                && let Some(parent) = record.lineage.parent_run_id.as_deref()
+            {
                 child_ids
                     .entry(parent)
                     .or_default()
@@ -131,7 +133,9 @@ impl EvidenceReader {
         }
         let mut entries: Vec<RunsListEntry> = records
             .iter()
-            .filter(|record| record.lineage.parent_run_id.is_none())
+            .filter(|record| {
+                record.lineage.parent_run_id.is_none() || record.lineage.shard.is_some()
+            })
             .map(|record| lineage_entry(record, &by_id, &child_ids))
             .collect();
         sort_newest_first(&mut entries);

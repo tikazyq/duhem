@@ -14,6 +14,7 @@ async fn seed(store: Arc<SqliteStore>, id: &str, parent: Option<&str>, required:
     let lineage = RunLineage {
         parent_run_id: parent.map(str::to_owned),
         origin: parent.map(|_| RunOrigin::Suite),
+        shard: None,
     };
     let mut secrets = SecretRegistry::new();
     secrets.register("token", "native-secret-value");
