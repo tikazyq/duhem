@@ -197,6 +197,25 @@ invocation; `DUHEM_OPENER` overrides the platform opener).
 
 
 
+### Find runs from CI
+
+When `duhem run` executes in GitHub Actions, GitLab CI or Buildkite, it records
+the available branch, PR number and CI run URL. Use `DUHEM_BRANCH`, `DUHEM_PR`
+and `DUHEM_CI_URL` to supply or override those values, including on other CI
+providers. Use a link that does not contain credentials.
+
+Try this with the Verification Definition you ran above:
+
+```bash
+DUHEM_BRANCH=feature/login DUHEM_PR=42 DUHEM_CI_URL=https://ci.example/runs/100 \
+  duhem run
+```
+
+In the dashboard's **Runs** page, filter by `feature/login` and PR `42` to
+find the run. Use **Target repo** to narrow the results to the stored repo
+coordinate, such as `github.com/acme/app`. The run header links back to CI.
+The same filters find the combined run when CI [runs several shards](distributed-runs.md).
+
 ### Report definitions with no recorded run
 
 `duhem coverage verifications --db /path/to/existing/duhem.db --base .` lists each

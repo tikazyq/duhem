@@ -10,7 +10,14 @@
 export type Verdict = string; // "pass" | "fail" | "inconclusive:<cause>"
 export type RunStatus = "pending" | "running" | "finished" | "aborted" | "orphaned";
 
-export interface RunsListEntry {
+export interface RunContext {
+  target_repo?: string;
+  branch?: string;
+  pr?: string;
+  ci_url?: string;
+}
+
+export interface RunsListEntry extends RunContext {
   run_id: string;
   verification: string;
   started_at: string | null;
@@ -116,7 +123,7 @@ export interface ShardCoverage {
   missing: MissingShard[];
 }
 
-export interface RunDetail {
+export interface RunDetail extends RunContext {
   shards?: ShardCoverage;
   check_totals?: RunCheckTotals;
   claim_scope?: ClaimScope;

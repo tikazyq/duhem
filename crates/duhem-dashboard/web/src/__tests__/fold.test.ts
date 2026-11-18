@@ -153,6 +153,10 @@ describe("carryFetched", () => {
     setup_aborted: false,
     has_definition: true,
     viewport: { width: 1280, height: 720 },
+    target_repo: "github.com/acme/app",
+    branch: "feature/login",
+    pr: "42",
+    ci_url: "https://ci.example/runs/1",
     cleanup: [],
     criteria: [],
   };
@@ -169,6 +173,10 @@ describe("carryFetched", () => {
     expect(merged.started_at).toBe("2026-06-10T10:00:00.000Z");
     expect(merged.inputs).toEqual({ user: "u1" });
     expect(merged.viewport).toEqual({ width: 1280, height: 720 });
+    expect(merged.target_repo).toBe("github.com/acme/app");
+    expect(merged.branch).toBe("feature/login");
+    expect(merged.pr).toBe("42");
+    expect(merged.ci_url).toBe("https://ci.example/runs/1");
   });
 
   it("leaves execution progress to the fold", () => {

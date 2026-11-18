@@ -72,6 +72,31 @@ describe("RunsList", () => {
     expect(badges.some((badge) => badge.textContent === "pass")).toBe(true);
   });
 
+  it("uses URL-backed CI filters on roots and keeps their children", async () => {
+    const ci = { target_repo: "github.com/acme/app", branch: "feature/a", pr: "42" };
+    stubRuns([
+      {
+        ...leaf("pipeline", "pass"),
+        ...ci,
+        kind: "run-set",
+        ci_url: "https://ci.example/runs/1",
+        children: [leaf("shard", "pass")],
+      },
+      { ...leaf("unrelated", "pass"), ...ci, pr: "43" },
+    ]);
+    renderRuns(<RunsList />, "/runs?repo=github.com%2Facme%2Fapp&branch=feature%2Fa&pr=42");
+    await screen.findByText("pipeline");
+    expect(screen.queryByText("unrelated")).toBeNull();
+    expect(screen.getByText("PR #42")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "CI run" }).getAttribute("href")).toBe("https://ci.example/runs/1");
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(screen.getByText("shard")).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "PR" }), { target: { value: "43" } });
+    await screen.findByText("unrelated");
+    expect(screen.queryByText("pipeline")).toBeNull();
+  });
+
   it("defaults to a flat newest-first view including run-set leaves", async () => {
     stubRuns([
       {

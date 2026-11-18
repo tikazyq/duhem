@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use duhem_actions::RunBrowser;
-use duhem_evidence::{RunLineage, RunOrigin, RunScope};
+use duhem_evidence::{RunLineage, RunOrigin};
 use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
 use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment, SuiteRunConfig};
 use duhem_schema::{
@@ -364,11 +364,6 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     // CLI precedence is explicit: invocation override > suite default
     // > the historical Playwright 1280x720 size.
     let viewport = resolve_viewport(viewport_override, manifest_defaults.as_ref());
-    // Suite-wide declared target (#191); leaf `project:` wins below.
-    let manifest_project: Option<duhem_schema::ProjectDecl> = match &scope {
-        Scope::Manifest { project, .. } => project.clone(),
-        Scope::SingleLeaf => None,
-    };
     let manifest_inputs: BTreeMap<String, duhem_schema::InputDecl> = match &scope {
         Scope::Manifest { inputs, .. } => inputs.clone(),
         Scope::SingleLeaf => BTreeMap::new(),
@@ -467,17 +462,35 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // The logical parent and its shards describe the same invocation scope.
+    let invocation_scope = invocation_parent.as_ref().map_or_else(
+        || {
+            let (project, vd_dir) = match &scope {
+                Scope::Manifest {
+                    project,
+                    manifest_dir,
+                    ..
+                } => (project.as_ref(), manifest_dir.as_deref()),
+                Scope::SingleLeaf => (
+                    leaves[0].definition.project.as_ref(),
+                    leaves[0].path.parent(),
+                ),
+            };
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            duhem_runtime::resolve_scope(project, &cwd, vd_dir)
+        },
+        |parent| parent.scope.clone(),
+    );
     if let Some(plan) = &shard_plan
-        && let Err(error) = plan.ensure_parent(store.clone(), &target).await
+        && let Err(error) = plan
+            .ensure_parent(store.clone(), &target, invocation_scope.clone())
+            .await
     {
         eprintln!("shard parent: {error}");
         return ExitCode::FAILURE;
     }
     let mut suite_native = Vec::new();
     let mut suite_parent_id: Option<String> = None;
-    let mut inherited_scope: Option<RunScope> = invocation_parent
-        .as_ref()
-        .map(|parent| parent.scope.clone());
     if let Scope::Manifest {
         provision: environment,
         native,
@@ -485,11 +498,6 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         ..
     } = &scope
     {
-        let suite_scope = inherited_scope.clone().unwrap_or_else(|| {
-            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            duhem_runtime::resolve_scope(manifest_project.as_ref(), &cwd, manifest_dir.as_deref())
-        });
-        inherited_scope = Some(suite_scope.clone());
         let suite_lineage = if let Some(plan) = &shard_plan {
             plan.lineage()
         } else {
@@ -521,7 +529,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 definition_path: &suite_definition_path,
                 manifest_dir: manifest_dir.as_deref(),
                 run_id: suite_run_id.clone(),
-                scope: suite_scope,
+                scope: invocation_scope.clone(),
                 lineage: suite_lineage,
                 skip_env_up: no_env_up,
             },
@@ -816,36 +824,17 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 watch_opened = true;
             }
         }
-        // Target identity (#191): the declared `project:` (leaf wins
-        // over manifest) enters the resolution ladder; the VD's
-        // directory anchors the verifier side.
+        engine = engine.with_scope(invocation_scope.clone());
         if let Some(parent_run_id) = suite_parent_id.as_ref() {
-            engine = engine
-                .with_scope(
-                    inherited_scope
-                        .clone()
-                        .expect("manifest suite scope resolved above"),
-                )
-                .with_lineage(RunLineage {
-                    parent_run_id: Some(parent_run_id.clone()),
-                    origin: Some(RunOrigin::Suite),
-                });
+            engine = engine.with_lineage(RunLineage {
+                parent_run_id: Some(parent_run_id.clone()),
+                origin: Some(RunOrigin::Suite),
+            });
         } else if let Some(parent) = invocation_parent.as_ref() {
-            engine = engine
-                .with_scope(parent.scope.clone())
-                .with_lineage(RunLineage {
-                    parent_run_id: Some(parent.run_id.clone()),
-                    origin: Some(RunOrigin::Invocation),
-                });
-        } else {
-            let declared = def.project.as_ref().or(manifest_project.as_ref());
-            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            let vd_dir = leaf_path.parent().map(Path::to_path_buf);
-            engine = engine.with_scope(duhem_runtime::resolve_scope(
-                declared,
-                &cwd,
-                vd_dir.as_deref(),
-            ));
+            engine = engine.with_lineage(RunLineage {
+                parent_run_id: Some(parent.run_id.clone()),
+                origin: Some(RunOrigin::Invocation),
+            });
         }
         if let Some(plan) = &shard_plan {
             let owned = plan.criteria(

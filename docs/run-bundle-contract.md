@@ -27,6 +27,9 @@ The canonical wire form is the compact JSON serialization of
     "project_id": "github.com/acme/app",
     "verifier_repo": "github.com/onsager-ai/duhem", "verifier_sha": "…",
     "target_repo": "github.com/acme/app", "target_sha": "…",
+    // CI context (all optional):
+    "branch": "feature/login", "pr": "42",
+    "ci_url": "https://github.com/acme/app/actions/runs/100",
     // #650 lineage and distributed plan (all optional):
     "parent_run_id": "01…", "origin": "shard", // suite | invocation | shard
     "shard": {"index": 1, "total": 2, "source": "env"},
@@ -116,6 +119,12 @@ failed upload resume by safely re-sending the same envelopes. `ship` includes
 descendants and the ancestors needed to resolve lineage. Shard arrivals can
 also create their logical parent idempotently when it is absent. Independently
 recorded logical-parent start times may differ; the first unjudged parent wins.
+
+The optional `run.branch`, `run.pr` and `run.ci_url` fields are strings from
+CI context. They are stored on the run header and do not participate in
+replay. A v1 bundle without these fields has no CI context and retains its
+canonical bytes. When an arriving shard creates a logical parent, it copies
+its run scope, including CI context, to the parent.
 
 Distributed metadata comes from `claim_scope_declared`; lineage comes from the
 store row and agrees with `run_started`. Leaf metadata can describe the enclosing

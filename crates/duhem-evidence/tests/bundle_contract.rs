@@ -2,7 +2,7 @@
 //!
 //! The closed-source hub builds against this shape (#188 open-core
 //! seam), so the envelope is pinned here: an intentional change must
-//! update the golden below AND bump `BUNDLE_VERSION`, and the PR
+//! update the golden below and bump `BUNDLE_VERSION` for incompatible changes. The PR
 //! carries the cross-repo coordination. An accidental drift fails
 //! this test.
 
@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 use duhem_evidence::{
     BUNDLE_VERSION, BundleArtifact, BundleRun, Event, EventPayload, EvidenceWriter,
-    ObservationValue, RunBundle, SESSION_EVIDENCE_OBSERVATION, STEP_SCREENSHOT_OBSERVATION,
-    SessionEvidence, SessionStep, SqliteStore, VerdictState, run_started,
+    ObservationValue, RunBundle, RunScope, SESSION_EVIDENCE_OBSERVATION,
+    STEP_SCREENSHOT_OBSERVATION, SessionEvidence, SessionStep, SqliteStore, Store, VerdictState,
+    run_started,
 };
 
 fn fixed_bundle() -> RunBundle {
@@ -32,6 +33,9 @@ fn fixed_bundle() -> RunBundle {
             verifier_sha: Some("deadbeef".into()),
             target_repo: Some("github.com/acme/app".into()),
             target_sha: Some("cafef00d".into()),
+            branch: None,
+            pr: None,
+            ci_url: None,
             parent_run_id: None,
             origin: None,
             shard: None,
@@ -100,6 +104,80 @@ fn additive_lineage_and_plan_fields_round_trip_without_changing_v1() {
     let tmp = tempfile::tempdir().unwrap();
     bundle.write_dir(tmp.path()).unwrap();
     assert_eq!(RunBundle::from_dir(tmp.path()).unwrap(), bundle);
+}
+
+#[tokio::test]
+async fn ci_context_round_trips_through_store_wire_export_and_ingest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = Arc::new(
+        SqliteStore::open(tmp.path().join("source.db"))
+            .await
+            .unwrap(),
+    );
+    let destination = SqliteStore::open(tmp.path().join("destination.db"))
+        .await
+        .unwrap();
+    let ci = RunScope {
+        branch: Some("feature/login".into()),
+        pr: Some("42".into()),
+        ci_url: Some("https://ci.example/runs/1".into()),
+        ..RunScope::default()
+    };
+    for (id, scope) in [("ci", ci), ("legacy", RunScope::default())] {
+        let mut writer = EvidenceWriter::begin_scoped(
+            source.clone(),
+            id,
+            "login.yml",
+            BTreeMap::new(),
+            scope.clone(),
+        )
+        .await
+        .unwrap();
+        writer
+            .append(run_started("login.yml", BTreeMap::new()))
+            .await
+            .unwrap();
+        writer
+            .append(EventPayload::RunFinished {
+                body_verdict: None,
+                verdict: None,
+            })
+            .await
+            .unwrap();
+        writer.finish().await.unwrap();
+
+        let bundle = RunBundle::from_store(source.as_ref(), id).await.unwrap();
+        assert_eq!(bundle.bundle_version, 1);
+        let wire = bundle.wire_bytes().unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&wire).unwrap();
+        for (field, value) in [
+            ("branch", &scope.branch),
+            ("pr", &scope.pr),
+            ("ci_url", &scope.ci_url),
+        ] {
+            assert_eq!(
+                json["run"].get(field).and_then(serde_json::Value::as_str),
+                value.as_deref()
+            );
+            if value.is_none() {
+                assert!(json["run"].get(field).is_none());
+            }
+        }
+        let decoded: RunBundle = serde_json::from_slice(&wire).unwrap();
+        assert_eq!(decoded, bundle);
+        let out = tmp.path().join(id);
+        decoded.write_dir(&out).unwrap();
+        assert_eq!(RunBundle::from_dir(&out).unwrap(), bundle);
+        destination
+            .ingest_bundle(&decoded, &bundle.content_hash().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(destination.get_run(id).await.unwrap().unwrap().scope, scope);
+        assert_eq!(
+            RunBundle::from_store(&destination, id).await.unwrap(),
+            bundle
+        );
+    }
 }
 
 #[test]

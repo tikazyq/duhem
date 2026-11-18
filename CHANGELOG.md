@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Runs and RunBundle v1 record optional CI branch, PR and URL, and the dashboard filters top-level runs by target repo, branch and PR as part of CI rollout (#673). (#663)
+
 - [additive] With a server configured, `duhem run` prints the run's server link (the combined run when sharded) and adds a summary with the link to the GitHub Actions job summary. (#673)
 
 - [clarifying] Auto-send skips unfinished runs and keeps sending the rest of the tree after a rejected run, summarizing what was skipped. (#673)

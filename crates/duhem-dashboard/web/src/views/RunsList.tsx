@@ -29,6 +29,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 
+import { RunCiContext } from "@/components/RunCiContext";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { EmptyState, ErrorState } from "@/components/states";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,11 @@ import type { RunsListEntry } from "../api";
 const VERDICT_CHIPS = ["pass", "fail", "inconclusive"] as const;
 const STATUS_CHIPS = ["pending", "running", "finished", "aborted", "orphaned"] as const;
 const ALL = "__all__";
+const CI_FILTERS = [
+  { param: "repo", label: "Target repo" },
+  { param: "branch", label: "Branch" },
+  { param: "pr", label: "PR" },
+] as const;
 type RunsView = "runs" | "verification" | "triage";
 
 function runsView(value: string | null): RunsView {
@@ -192,13 +198,16 @@ const columns: ColumnDef<RunsListEntry>[] = [
     accessorFn: (r) => r.verification,
     header: ({ column }) => <SortHeader column={column}>Verification</SortHeader>,
     cell: ({ row }) => (
-      <Link
-        to={`/verification/${encodeURIComponent(row.original.verification)}`}
-        className="block max-w-[24ch] truncate hover:underline"
-        title={row.original.verification}
-      >
-        {row.original.verification}
-      </Link>
+      <div>
+        <Link
+          to={`/verification/${encodeURIComponent(row.original.verification)}`}
+          className="block max-w-[24ch] truncate hover:underline"
+          title={row.original.verification}
+        >
+          {row.original.verification}
+        </Link>
+        <RunCiContext run={row.original} />
+      </div>
     ),
   },
   {
@@ -371,6 +380,18 @@ export default function RunsList() {
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
   const view = runsView(params.get("view"));
+  const repo = params.get("repo") ?? "";
+  const branch = params.get("branch") ?? "";
+  const pr = params.get("pr") ?? "";
+  const hasCiFilters = Boolean(repo || branch || pr);
+  const matchingRoots = useMemo(
+    () => (runs ?? []).filter((run) =>
+      (!repo || run.target_repo === repo) &&
+      (!branch || run.branch === branch) &&
+      (!pr || run.pr === pr),
+    ),
+    [runs, repo, branch, pr],
+  );
 
   const verifications = useMemo(
     () =>
@@ -382,10 +403,10 @@ export default function RunsList() {
 
   const filteredLeaves = useMemo(
     () =>
-      flatLeaves(runs ?? []).filter((entry) =>
+      flatLeaves(matchingRoots).filter((entry) =>
         matchesFilters(entry, verification, verdicts, statuses, from, to),
       ),
-    [runs, verification, verdicts, statuses, from, to],
+    [matchingRoots, verification, verdicts, statuses, from, to],
   );
   const filteredGroups = useMemo(
     () => {
@@ -405,11 +426,11 @@ export default function RunsList() {
           kind: children.length > 0 ? "run-set" : "leaf",
         };
       };
-      return (runs ?? [])
+      return matchingRoots
         .map(filterTree)
         .filter((entry): entry is RunsListEntry => entry !== null);
     },
-    [runs, verification, verdicts, statuses, from, to],
+    [matchingRoots, verification, verdicts, statuses, from, to],
   );
 
   const update = (mutate: (p: URLSearchParams) => void) => {
@@ -424,11 +445,15 @@ export default function RunsList() {
     setParams(next, { replace: true });
   };
   const hasFilters =
+    hasCiFilters ||
     Boolean(verification) ||
     verdicts.length > 0 ||
     statuses.length > 0 ||
     Boolean(from) ||
     Boolean(to);
+
+  const showTree = view === "verification" || (view === "runs" && hasCiFilters);
+  const listedRuns = showTree ? filteredGroups : filteredLeaves;
 
   if (error) return <ErrorState error={error} />;
 
@@ -472,6 +497,20 @@ export default function RunsList() {
       </nav>
 
       <div className="flex flex-wrap items-center gap-2">
+        {CI_FILTERS.map(({ param, label }) => (
+          <Input
+            key={param}
+            aria-label={label}
+            placeholder={label}
+            value={params.get(param) ?? ""}
+            className="h-8 w-[9.5rem]"
+            onChange={(e) =>
+              update((p) =>
+                e.target.value ? p.set(param, e.target.value) : p.delete(param),
+              )
+            }
+          />
+        ))}
         <Select
           value={verification || ALL}
           onValueChange={(v) =>
@@ -590,7 +629,7 @@ export default function RunsList() {
 
       {runs === null ? (
         <Skeleton className="h-64 rounded-xl" />
-      ) : filteredLeaves.length === 0 ? (
+      ) : listedRuns.length === 0 ? (
         <EmptyState
           icon={Inbox}
           title={runs.length > 0 ? "No runs match the filters" : "No runs yet"}
@@ -612,7 +651,7 @@ export default function RunsList() {
           <TriageView leaves={filteredLeaves} />
         ) : (
           <RunsTable
-            data={view === "verification" ? filteredGroups : filteredLeaves}
+            data={listedRuns}
             label={
               view === "verification"
                 ? "Runs grouped by verification"

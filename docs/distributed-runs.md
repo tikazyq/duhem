@@ -88,6 +88,26 @@ that passes `CI_NODE_INDEX` directly to its one-based `--shard` flag.
 Use a new shared identity for each logical invocation; if a provider's retry
 keeps these components unchanged, include your attempt identifier explicitly.
 
+## Find a pipeline in the dashboard
+
+Shards and their logical parent record the target repository and any available
+CI context. Set `DUHEM_BRANCH`, `DUHEM_PR` and `DUHEM_CI_URL` to override
+individual fields. Use the same values in every shard and keep credentials out
+of these fields because the dashboard displays them.
+
+Without an override, Duhem checks these providers in order for each field:
+
+| CI | Branch | PR | CI URL |
+| --- | --- | --- | --- |
+| GitHub Actions | `GITHUB_HEAD_REF` on PRs, otherwise the branch ref | Number from `refs/pull/<number>/…` or the PR event payload | Workflow run URL from `GITHUB_SERVER_URL`, `GITHUB_REPOSITORY` and `GITHUB_RUN_ID` |
+| GitLab CI | `CI_MERGE_REQUEST_SOURCE_BRANCH_NAME`, `CI_COMMIT_BRANCH` or the non-tag `CI_COMMIT_REF_NAME` | `CI_MERGE_REQUEST_IID` | `CI_PIPELINE_URL` |
+| Buildkite | `BUILDKITE_BRANCH` | `BUILDKITE_PULL_REQUEST` when set to a PR number | `BUILDKITE_BUILD_URL` |
+
+The **Runs** page filters on the top-level run. The matching run keeps its
+shards and their children. `GET /api/runs` and `GET /api/runs.json` take the
+same exact-match filters. `repo` matches the stored `target_repo`, for example
+`/api/runs?repo=github.com%2Facme%2Fapp&branch=feature%2Flogin&pr=42`.
+
 ## CI recipes
 
 CI's own shard job statuses are the merge gate: a failed or missing shard fails

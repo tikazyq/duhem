@@ -97,6 +97,9 @@ pub struct RunScope {
     /// The repo of the artifact under test.
     pub target_repo: Option<String>,
     pub target_sha: Option<String>,
+    pub branch: Option<String>,
+    pub pr: Option<String>,
+    pub ci_url: Option<String>,
 }
 
 /// Recorded relationship to another run. Root and pre-lineage runs

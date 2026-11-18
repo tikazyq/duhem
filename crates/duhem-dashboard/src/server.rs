@@ -8,7 +8,7 @@
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::sse::{KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -17,7 +17,7 @@ use rust_embed::RustEmbed;
 use serde_json::json;
 
 use crate::live::live_stream;
-use crate::reader::{EvidenceReader, ReaderError};
+use crate::reader::{EvidenceReader, ReaderError, RunFilters};
 
 /// The Vite SPA bundle (#86), embedded at compile time. `build.rs`
 /// guarantees the folder exists (placeholder index when the SPA
@@ -84,8 +84,11 @@ fn strip_json_suffix(s: &str) -> &str {
     s.strip_suffix(".json").unwrap_or(s)
 }
 
-async fn list_runs(State(reader): State<EvidenceReader>) -> Response {
-    match reader.list().await {
+async fn list_runs(
+    State(reader): State<EvidenceReader>,
+    Query(filters): Query<RunFilters>,
+) -> Response {
+    match reader.list_filtered(filters).await {
         Ok(list) => axum::Json(list).into_response(),
         Err(e) => e.into_response(),
     }

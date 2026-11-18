@@ -89,6 +89,25 @@ impl RunEvidence {
 
 pub use duhem_evidence::verification_name;
 
+#[derive(Debug, Default, serde::Deserialize)]
+pub(crate) struct RunFilters {
+    repo: Option<String>,
+    branch: Option<String>,
+    pr: Option<String>,
+}
+
+impl RunFilters {
+    fn matches(&self, record: &RunRecord) -> bool {
+        [
+            (&self.repo, &record.scope.target_repo),
+            (&self.branch, &record.scope.branch),
+            (&self.pr, &record.scope.pr),
+        ]
+        .into_iter()
+        .all(|(filter, value)| filter.is_none() || filter == value)
+    }
+}
+
 /// Read-only view over the evidence store. Clone-cheap (`Arc`).
 #[derive(Clone)]
 pub struct EvidenceReader {
@@ -128,6 +147,13 @@ impl EvidenceReader {
     /// `GET /api/runs`: a recorded-lineage tree. Top-level rows have
     /// no parent; every descendant is nested under its recorded parent.
     pub async fn list(&self) -> Result<Vec<RunsListEntry>, ReaderError> {
+        self.list_filtered(RunFilters::default()).await
+    }
+
+    pub(crate) async fn list_filtered(
+        &self,
+        filters: RunFilters,
+    ) -> Result<Vec<RunsListEntry>, ReaderError> {
         let records = self.store.list_runs().await?;
         let by_id: BTreeMap<&str, &RunRecord> = records
             .iter()
@@ -144,7 +170,7 @@ impl EvidenceReader {
         }
         let mut entries: Vec<RunsListEntry> = records
             .iter()
-            .filter(|record| record.lineage.parent_run_id.is_none())
+            .filter(|record| record.lineage.parent_run_id.is_none() && filters.matches(record))
             .map(|record| lineage_entry(record, &by_id, &child_ids))
             .collect();
         for entry in &mut entries {
@@ -575,6 +601,7 @@ fn lineage_entry(
     children.sort_by_key(|child| (child.started_at, child.run_id.clone()));
     let has_children = !children.is_empty();
     RunsListEntry {
+        context: (&record.scope).into(),
         run_id: record.run_id.clone(),
         verification: verification_name(&record.verification),
         started_at: Some(record.started_at),
@@ -806,6 +833,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         .collect();
 
     RunDetail {
+        context: (&run.record.scope).into(),
         claim_scope: duhem_evidence::claim_scope::claim_scope(&run.events),
         body_verdict,
         run_id: run.record.run_id.clone(),

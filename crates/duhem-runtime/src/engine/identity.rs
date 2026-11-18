@@ -139,7 +139,79 @@ pub(crate) fn resolve_scope_with(
         verifier_sha,
         target_repo,
         target_sha,
+        branch: source.env("DUHEM_BRANCH").or_else(|| {
+            source
+                .env("GITHUB_HEAD_REF")
+                .or_else(|| {
+                    let reference = source.env("GITHUB_REF");
+                    if let Some(reference) = reference.as_deref() {
+                        reference.strip_prefix("refs/heads/").map(str::to_owned)
+                    } else if source.env("GITHUB_REF_TYPE").as_deref() != Some("tag") {
+                        source.env("GITHUB_REF_NAME")
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| source.env("CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"))
+                .or_else(|| source.env("CI_COMMIT_BRANCH"))
+                .or_else(|| {
+                    if source.env("CI_COMMIT_TAG").is_some() {
+                        None
+                    } else {
+                        source.env("CI_COMMIT_REF_NAME")
+                    }
+                })
+                .or_else(|| source.env("BUILDKITE_BRANCH"))
+        }),
+        pr: source
+            .env("DUHEM_PR")
+            .or_else(|| github_pr(source))
+            .or_else(|| source.env("CI_MERGE_REQUEST_IID"))
+            .or_else(|| {
+                source
+                    .env("BUILDKITE_PULL_REQUEST")
+                    .filter(|pr| pr != "false")
+            }),
+        ci_url: source
+            .env("DUHEM_CI_URL")
+            .or_else(|| {
+                let server = source.env("GITHUB_SERVER_URL")?;
+                let repo = source.env("GITHUB_REPOSITORY")?;
+                let run = source.env("GITHUB_RUN_ID")?;
+                Some(format!(
+                    "{}/{repo}/actions/runs/{run}",
+                    server.trim_end_matches('/')
+                ))
+            })
+            .or_else(|| source.env("CI_PIPELINE_URL"))
+            .or_else(|| source.env("BUILDKITE_BUILD_URL")),
     }
+}
+
+fn github_pr(source: &dyn IdentitySource) -> Option<String> {
+    if let Some(reference) = source.env("GITHUB_REF")
+        && let Some((number, kind)) = reference
+            .strip_prefix("refs/pull/")
+            .and_then(|r| r.split_once('/'))
+        && matches!(kind, "merge" | "head")
+        && !number.is_empty()
+        && number.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Some(number.to_owned());
+    }
+    // pull_request_target uses the base branch ref, so read the PR event number.
+    if !matches!(
+        source.env("GITHUB_EVENT_NAME").as_deref(),
+        Some("pull_request" | "pull_request_target")
+    ) {
+        return None;
+    }
+    let event = std::fs::File::open(source.env("GITHUB_EVENT_PATH")?).ok()?;
+    let event: serde_json::Value = serde_json::from_reader(std::io::BufReader::new(event)).ok()?;
+    event
+        .get("number")?
+        .as_u64()
+        .map(|number| number.to_string())
 }
 
 /// Normalize a git remote URL to `host/owner/repo`:
@@ -201,6 +273,115 @@ mod tests {
         fn head_sha(&self, dir: &Path) -> Option<String> {
             self.shas.get(dir).cloned()
         }
+    }
+
+    #[test]
+    fn detects_ci_context_per_provider() {
+        let cases = [
+            [
+                ("GITHUB_HEAD_REF", "feature/github"),
+                ("GITHUB_REF", "refs/pull/42/merge"),
+                ("GITHUB_SERVER_URL", "https://github.example"),
+                ("GITHUB_REPOSITORY", "acme/app"),
+                ("GITHUB_RUN_ID", "100"),
+            ],
+            [
+                ("CI_MERGE_REQUEST_SOURCE_BRANCH_NAME", "feature/gitlab"),
+                ("CI_COMMIT_REF_NAME", "refs/merge-requests/42/head"),
+                ("CI_MERGE_REQUEST_IID", "42"),
+                (
+                    "CI_PIPELINE_URL",
+                    "https://gitlab.example/acme/app/-/pipelines/100",
+                ),
+                ("GITLAB_CI", "true"),
+            ],
+            [
+                ("BUILDKITE_BRANCH", "feature/buildkite"),
+                ("BUILDKITE_PULL_REQUEST", "42"),
+                (
+                    "BUILDKITE_BUILD_URL",
+                    "https://buildkite.com/acme/app/builds/100",
+                ),
+                ("BUILDKITE", "true"),
+                ("BUILDKITE_BUILD_ID", "100"),
+            ],
+        ];
+        for (vars, (branch, url)) in cases.into_iter().zip([
+            (
+                "feature/github",
+                "https://github.example/acme/app/actions/runs/100",
+            ),
+            (
+                "feature/gitlab",
+                "https://gitlab.example/acme/app/-/pipelines/100",
+            ),
+            (
+                "feature/buildkite",
+                "https://buildkite.com/acme/app/builds/100",
+            ),
+        ]) {
+            let mut src = FakeSource {
+                env: vars.map(|(key, value)| (key.into(), value.into())).into(),
+                ..Default::default()
+            };
+            let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+            assert_eq!(scope.branch.as_deref(), Some(branch));
+            assert_eq!(scope.pr.as_deref(), Some("42"));
+            assert_eq!(scope.ci_url.as_deref(), Some(url));
+
+            src.env.insert("DUHEM_BRANCH".into(), "explicit".into());
+            let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+            assert_eq!(scope.branch.as_deref(), Some("explicit"));
+            assert_eq!(scope.pr.as_deref(), Some("42"));
+            assert_eq!(scope.ci_url.as_deref(), Some(url));
+
+            src.env.insert("DUHEM_PR".into(), "17".into());
+            src.env
+                .insert("DUHEM_CI_URL".into(), "https://ci.example/build".into());
+            let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+            assert_eq!(scope.pr.as_deref(), Some("17"));
+            assert_eq!(scope.ci_url.as_deref(), Some("https://ci.example/build"));
+        }
+    }
+
+    #[test]
+    fn ci_metadata_does_not_treat_tags_or_non_pr_markers_as_values() {
+        let mut src = FakeSource::default();
+        let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+        assert!(scope.branch.is_none() && scope.pr.is_none() && scope.ci_url.is_none());
+
+        src.env
+            .insert("GITHUB_REF".into(), "refs/heads/main".into());
+        let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+        assert_eq!(scope.branch.as_deref(), Some("main"));
+        assert!(scope.pr.is_none());
+
+        src.env.insert("GITHUB_REF".into(), "refs/tags/v1".into());
+        src.env
+            .insert("BUILDKITE_PULL_REQUEST".into(), "false".into());
+        let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+        assert!(scope.branch.is_none() && scope.pr.is_none());
+    }
+
+    #[test]
+    fn github_pull_request_target_reads_the_event_number() {
+        let mut event = tempfile::NamedTempFile::new().unwrap();
+        serde_json::to_writer(&mut event, &serde_json::json!({"number": 42})).unwrap();
+        let src = FakeSource {
+            env: HashMap::from([
+                ("GITHUB_EVENT_NAME".into(), "pull_request_target".into()),
+                (
+                    "GITHUB_EVENT_PATH".into(),
+                    event.path().to_string_lossy().into_owned(),
+                ),
+                ("GITHUB_REF".into(), "refs/heads/main".into()),
+                ("GITHUB_HEAD_REF".into(), "topic".into()),
+            ]),
+            ..Default::default()
+        };
+        let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+        assert_eq!(scope.branch.as_deref(), Some("topic"));
+        assert_eq!(scope.pr.as_deref(), Some("42"));
     }
 
     fn declared(repo: &str) -> ProjectDecl {

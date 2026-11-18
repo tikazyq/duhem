@@ -74,6 +74,113 @@ async fn runs_list_single_leaf_run() {
 }
 
 #[tokio::test]
+async fn runs_filter_root_context_exactly_and_keep_descendants() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    for (id, repo, branch, pr, parent) in [
+        ("root", "github.com/acme/app", "feature/a", "42", None),
+        (
+            "child",
+            "github.com/acme/other",
+            "child-only",
+            "70",
+            Some("root"),
+        ),
+        (
+            "grandchild",
+            "github.com/acme/other",
+            "child-only",
+            "70",
+            Some("child"),
+        ),
+        ("other-branch", "github.com/acme/app", "main", "43", None),
+        (
+            "other-repo",
+            "github.com/acme/other",
+            "feature/a",
+            "42",
+            None,
+        ),
+    ] {
+        let lineage = RunLineage {
+            parent_run_id: parent.map(str::to_owned),
+            origin: parent.map(|_| RunOrigin::Suite),
+        };
+        let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
+            rw.clone(),
+            id,
+            "ci.yml",
+            BTreeMap::new(),
+            RunScope {
+                target_repo: Some(repo.into()),
+                branch: Some(branch.into()),
+                pr: Some(pr.into()),
+                ci_url: Some("https://ci.example/run/100".into()),
+                ..RunScope::default()
+            },
+            lineage.clone(),
+            SecretRegistry::new(),
+        )
+        .await
+        .unwrap();
+        writer
+            .append(run_started_with_definition_and_lineage(
+                "ci.yml",
+                BTreeMap::new(),
+                None,
+                lineage,
+            ))
+            .await
+            .unwrap();
+        writer.finish().await.unwrap();
+    }
+    let reader = EvidenceReader::new(ro);
+    for (query, expected) in [
+        (
+            "repo=github.com%2Facme%2Fapp",
+            &["other-branch", "root"][..],
+        ),
+        ("branch=feature%2Fa", &["other-repo", "root"][..]),
+        ("pr=42", &["other-repo", "root"][..]),
+        (
+            "repo=github.com%2Facme%2Fapp&branch=feature%2Fa&pr=42",
+            &["root"][..],
+        ),
+        (
+            "repo=github.com%2Facme%2Fapp&branch=feature%2Fa&pr=43",
+            &[][..],
+        ),
+        ("branch=feature", &[][..]),
+        ("branch=child-only", &[][..]),
+    ] {
+        for path in ["/api/runs", "/api/runs.json"] {
+            let (status, json) = get_json(reader.clone(), &format!("{path}?{query}")).await;
+            assert_eq!(status, StatusCode::OK);
+            let rows = json.as_array().unwrap();
+            let mut ids: Vec<_> = rows
+                .iter()
+                .map(|row| row["run_id"].as_str().unwrap())
+                .collect();
+            ids.sort_unstable();
+            assert_eq!(ids, expected, "{path}?{query}");
+            if let Some(root) = rows.iter().find(|row| row["run_id"] == "root") {
+                assert_eq!(root["branch"], "feature/a");
+                assert_eq!(root["pr"], "42");
+                assert_eq!(root["target_repo"], "github.com/acme/app");
+                assert_eq!(root["ci_url"], "https://ci.example/run/100");
+                assert_eq!(root["children"][0]["run_id"], "child");
+                assert_eq!(root["children"][0]["children"][0]["run_id"], "grandchild");
+            }
+        }
+    }
+    let (status, detail) = get_json(reader, "/api/runs/root").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["target_repo"], "github.com/acme/app");
+    assert_eq!(detail["branch"], "feature/a");
+    assert_eq!(detail["pr"], "42");
+    assert_eq!(detail["ci_url"], "https://ci.example/run/100");
+}
+
+#[tokio::test]
 async fn check_artifact_surfaces_secret_mask_occurrence_counts() {
     let (_tmp, rw, ro) = common::open_stores().await;
     let run_id = "01J0000000000000000000000S";

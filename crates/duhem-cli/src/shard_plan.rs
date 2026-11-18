@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
-use duhem_evidence::{EvidenceWriter, RunLineage, RunOrigin, Store};
+use duhem_evidence::{EvidenceWriter, RunLineage, RunOrigin, RunScope, Store};
 use duhem_runtime::CheckFilter;
 use duhem_schema::{Loaded, LoadedLeaf, NativeRun};
 use duhem_summary::{DistributedRun, ExpectedPartition, ManifestSelection};
@@ -180,6 +180,7 @@ impl Plan {
         &self,
         store: Arc<dyn Store>,
         path: &Path,
+        scope: RunScope,
     ) -> Result<(), duhem_evidence::WriterError> {
         let id = self
             .metadata
@@ -187,8 +188,14 @@ impl Plan {
             .as_deref()
             .expect("shard parent");
         if store.get_run(id).await?.is_none() {
-            let mut writer =
-                EvidenceWriter::begin(store, id, &path.to_string_lossy(), BTreeMap::new()).await?;
+            let mut writer = EvidenceWriter::begin_scoped(
+                store,
+                id,
+                &path.to_string_lossy(),
+                BTreeMap::new(),
+                scope,
+            )
+            .await?;
             writer
                 .append(duhem_evidence::run_started(
                     path.to_string_lossy(),

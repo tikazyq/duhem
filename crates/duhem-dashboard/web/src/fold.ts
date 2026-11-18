@@ -3,7 +3,7 @@
 // serves. The browser never computes a verdict: every verdict below
 // is lifted verbatim from the judge's `*_finished` events.
 
-import type { ClaimScope, CriterionDetail, LifecycleBlock, RunDetail, TraceEvent } from "./api";
+import type { ClaimScope, CriterionDetail, LifecycleBlock, RunContext, RunDetail, TraceEvent } from "./api";
 
 /** Fields `foldRun` cannot derive from the event stream. `useRun` carries
  *  them over from the authoritative `GET /api/runs/:id` so a live run shows
@@ -13,7 +13,7 @@ import type { ClaimScope, CriterionDetail, LifecycleBlock, RunDetail, TraceEvent
 export type FoldUnknowable = Pick<
   RunDetail,
   "verification" | "started_at" | "inputs" | "has_definition" | "viewport"
-> & Pick<RunDetail, "duration_ms" | "children" | "native" | "layers" | "shards" | "check_totals">;
+> & Pick<RunDetail, "duration_ms" | "children" | "native" | "layers" | "shards" | "check_totals"> & RunContext;
 
 /** Overlay the fetched detail's fold-unknowable fields onto a live fold. */
 export function carryFetched(folded: RunDetail, fetched: RunDetail): RunDetail {
@@ -29,6 +29,10 @@ export function carryFetched(folded: RunDetail, fetched: RunDetail): RunDetail {
     inputs: fetched.inputs,
     has_definition: fetched.has_definition,
     viewport: fetched.viewport,
+    target_repo: fetched.target_repo,
+    branch: fetched.branch,
+    pr: fetched.pr,
+    ci_url: fetched.ci_url,
   };
   return { ...folded, ...carried };
 }

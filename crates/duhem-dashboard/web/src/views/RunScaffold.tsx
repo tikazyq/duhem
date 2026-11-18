@@ -21,6 +21,7 @@ import { carryFetched, foldRun } from "../fold";
 import { assertionKey, isExplicitAssertion, deliveryLayerLabel, groupTimeline, stepStatus } from "../format";
 import { groupLoops, stepNavigation } from "../step-presentation";
 import { LoopGroup } from "../components/LoopGroup";
+import { RunCiContext } from "../components/RunCiContext";
 import { RailSplitter } from "../components/RailSplitter";
 import { LifecycleRailRow } from "../components/LifecycleRailRow";
 import { lifecycleAtCheck, lifecycleAtCriterion, lifecycleHref, lifecycleKey } from "../lifecycle";
@@ -757,6 +758,7 @@ export function VerdictBand({
             )}
           </span>
         </h2>
+        {!collapsed && <RunCiContext run={run} />}
         {!collapsed && (
           <p
             data-testid="verdict-summary"

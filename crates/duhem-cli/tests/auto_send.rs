@@ -307,6 +307,10 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
         let output = command(&manifest, &db)
             .env("DUHEM_SHARD", shard)
             .env("DUHEM_RUN_ID", "same-invocation")
+            .env("DUHEM_TARGET_REPO", "github.com/acme/app")
+            .env("DUHEM_BRANCH", "feature/shards")
+            .env("DUHEM_PR", "42")
+            .env("DUHEM_CI_URL", "https://ci.example/runs/100")
             .env("GITHUB_STEP_SUMMARY", &summary)
             .env("DUHEM_SERVER_URL", &url[..url.len() - "/api/ingest".len()])
             .env("DUHEM_SERVER_TOKEN", "test-token")
@@ -409,7 +413,9 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
     let base = url.strip_suffix("/api/ingest").unwrap();
     let client = reqwest::Client::new();
     let list: serde_json::Value = client
-        .get(format!("{base}/api/runs"))
+        .get(format!(
+            "{base}/api/runs?repo=github.com%2Facme%2Fapp&branch=feature%2Fshards&pr=42"
+        ))
         .send()
         .await
         .unwrap()
@@ -417,6 +423,8 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
         .await
         .unwrap();
     assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(list[0]["run_id"], parent.run_id);
+    assert_eq!(list[0]["ci_url"], "https://ci.example/runs/100");
     assert_eq!(list[0]["children"].as_array().unwrap().len(), 2);
     for child in list[0]["children"].as_array().unwrap() {
         assert_eq!(child["origin"], "shard");
@@ -450,6 +458,10 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
         .iter()
         .find(|run| run.lineage.origin == Some(duhem_evidence::RunOrigin::Shard))
         .unwrap();
+    let local_parent = source.get_run(&parent.run_id).await.unwrap().unwrap();
+    assert_eq!(local_parent.scope, shard.scope);
+    assert_eq!(local_parent.scope.branch.as_deref(), Some("feature/shards"));
+    assert_eq!(local_parent.scope.pr.as_deref(), Some("42"));
     let standalone = RunBundle::from_store(&source, &shard.run_id).await.unwrap();
     let fresh = SqliteStore::open(tmp.path().join("first-arrival.db"))
         .await
@@ -467,6 +479,8 @@ async fn shards_auto_send_replayed_tree_and_identical_resend_is_a_noop() {
         2,
         "first shard creates its logical parent once"
     );
+    let synthesized_parent = fresh.get_run(&parent.run_id).await.unwrap().unwrap();
+    assert_eq!(synthesized_parent.scope, local_parent.scope);
     let leaf = source_records
         .iter()
         .find(|run| run.verdict == Some(VerdictState::Pass))

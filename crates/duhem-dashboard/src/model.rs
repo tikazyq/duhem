@@ -8,7 +8,7 @@
 //! re-judged at the view layer.
 
 use chrono::{DateTime, Utc};
-use duhem_evidence::{Event, RunOrigin, RunStatus, StepOutcome, VerdictState};
+use duhem_evidence::{Event, RunOrigin, RunScope, RunStatus, StepOutcome, VerdictState};
 use serde::Serialize;
 
 fn is_zero(value: &u32) -> bool {
@@ -23,9 +23,35 @@ pub enum EntryKind {
     RunSet,
 }
 
+/// Context stored on the run header, independent of verdict events.
+#[derive(Debug, Clone, Serialize)]
+pub struct RunContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_repo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ci_url: Option<String>,
+}
+
+impl From<&RunScope> for RunContext {
+    fn from(scope: &RunScope) -> Self {
+        Self {
+            target_repo: scope.target_repo.clone(),
+            branch: scope.branch.clone(),
+            pr: scope.pr.clone(),
+            ci_url: scope.ci_url.clone(),
+        }
+    }
+}
+
 /// One row of `GET /api/runs`.
 #[derive(Debug, Clone, Serialize)]
 pub struct RunsListEntry {
+    #[serde(flatten)]
+    pub context: RunContext,
     /// The recorded run's ULID. Every row, including a run-set parent,
     /// is addressable via `/api/runs/:run_id`.
     pub run_id: String,
@@ -48,6 +74,8 @@ pub struct RunsListEntry {
 /// `GET /api/runs/:run_id`.
 #[derive(Debug, Clone, Serialize)]
 pub struct RunDetail {
+    #[serde(flatten)]
+    pub context: RunContext,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claim_scope: Option<duhem_summary::ClaimScope>,
     #[serde(skip_serializing_if = "Option::is_none")]

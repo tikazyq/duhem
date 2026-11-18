@@ -787,6 +787,7 @@ fn scope_for(project: &str, target_sha: &str, verdict_target: &str) -> RunScope 
         verifier_sha: Some("deadbeef".to_string()),
         target_repo: Some(verdict_target.to_string()),
         target_sha: Some(target_sha.to_string()),
+        ..RunScope::default()
     }
 }
 
@@ -911,6 +912,40 @@ async fn migration_is_additive_and_lossless_over_a_pre_scoping_store() {
     .await;
     let new = store.get_run("01NEW").await.unwrap().unwrap();
     assert_eq!(new.scope.project_id.as_deref(), Some("github.com/acme/app"));
+}
+
+#[tokio::test]
+async fn read_only_store_can_read_runs_before_ci_context_migration() {
+    use sqlx::ConnectOptions;
+
+    let tmp = TempDir::new().unwrap();
+    let db = tmp.path().join("duhem.db");
+    let mut conn = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&db)
+        .create_if_missing(true)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        .connect()
+        .await
+        .unwrap();
+    let migrator = sqlx::migrate!("./migrations");
+    for migration in migrator.iter().filter(|migration| migration.version < 9) {
+        sqlx::raw_sql(&migration.sql)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO runs (run_id, verification, schema_version, started_at) \
+         VALUES ('old', 'old.yml', 'v1', '2026-07-01T00:00:00.000Z')",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    let store = SqliteStore::open_read_only(&db).await.unwrap();
+    let run = store.get_run("old").await.unwrap().unwrap();
+    assert!(run.scope.branch.is_none());
+    assert!(run.scope.pr.is_none());
+    assert!(run.scope.ci_url.is_none());
 }
 
 #[tokio::test]
