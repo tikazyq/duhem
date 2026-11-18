@@ -1,0 +1,9 @@
+<testsuites id="" name="" tests="2" failures="1" skipped="0" errors="0" time="1.25">
+  <testsuites name="chromium">
+    <testsuite name="checkout.spec.ts" tests="2" failures="1" skipped="0" time="1.25">
+      <testcase name="checkout succeeds" classname="checkout.spec.ts" time="0.25"/>
+      <testcase name="checkout times out" classname="checkout.spec.ts" time="1"><failure message="checkout.spec.ts:9:1 checkout times out" type="FAILURE"><![CDATA[TimeoutError: locator.click: Timeout exceeded
+Call log: waiting for <button>]]></failure></testcase>
+    </testsuite>
+  </testsuites>
+</testsuites>

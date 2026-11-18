@@ -19,6 +19,46 @@ pub struct NativeRunSummary {
     pub stdout_blob_sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stderr_blob_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counts: Option<NativeTestCounts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_blob_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results_blob_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failing_tests: Vec<NativeTestResult>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeTestCounts {
+    pub passed: u32,
+    pub failed: u32,
+    pub errored: u32,
+    pub skipped: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeTestStatus {
+    Passed,
+    Failed,
+    Errored,
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeTestResult {
+    pub id: String,
+    pub classname: String,
+    pub name: String,
+    pub status: NativeTestStatus,
+    pub duration_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,7 +68,15 @@ pub struct LayerTotals {
     pub passed: u64,
     pub failed: u64,
     pub inconclusive: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub errored: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub skipped: u64,
     pub duration_ms: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 pub fn layer_totals(
@@ -46,6 +94,7 @@ pub fn layer_totals(
             failed: checks.failed.into(),
             inconclusive: checks.inconclusive.into(),
             duration_ms: check_duration_ms,
+            ..Default::default()
         },
     );
     for run in native {
@@ -56,10 +105,17 @@ pub fn layer_totals(
         });
         row.tests += u64::from(run.tests);
         row.duration_ms += run.duration_ms;
-        match run.outcome {
-            VerdictState::Pass => row.passed += u64::from(run.tests),
-            VerdictState::Fail => row.failed += u64::from(run.tests),
-            VerdictState::Inconclusive(_) => row.inconclusive += u64::from(run.tests),
+        if let Some(counts) = &run.counts {
+            row.passed += u64::from(counts.passed);
+            row.failed += u64::from(counts.failed);
+            row.errored += u64::from(counts.errored);
+            row.skipped += u64::from(counts.skipped);
+        } else {
+            match run.outcome {
+                VerdictState::Pass => row.passed += u64::from(run.tests),
+                VerdictState::Fail => row.failed += u64::from(run.tests),
+                VerdictState::Inconclusive(_) => row.inconclusive += u64::from(run.tests),
+            }
         }
     }
     totals.into_values().collect()
@@ -97,7 +153,16 @@ mod tests {
             detail: Some("failed".into()),
             stdout_blob_sha256: None,
             stderr_blob_sha256: None,
+            counts: None,
+            report_path: None,
+            report_blob_sha256: None,
+            results_blob_sha256: None,
+            failing_tests: vec![],
         };
+        assert_eq!(
+            serde_json::to_string(&command).unwrap(),
+            r#"{"id":"unit","layer":"unit","outcome":"fail","duration_ms":12,"required":false,"tests":1,"exit_code":1,"detail":"failed"}"#
+        );
         let child = RunSummary::new("r", VerdictState::Pass, vec![], "store.db".into())
             .with_totals(CheckTotals {
                 total: 2,

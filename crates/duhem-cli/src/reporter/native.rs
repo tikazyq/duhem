@@ -18,6 +18,25 @@ pub(super) fn write_native(
             run.duration_ms,
             if run.required { "" } else { ", diagnostic" }
         )?;
+        if let Some(counts) = &run.counts {
+            writeln!(
+                out,
+                "    {} passed, {} failed, {} errored, {} skipped",
+                counts.passed, counts.failed, counts.errored, counts.skipped
+            )?;
+        }
+        for test in &run.failing_tests {
+            writeln!(
+                out,
+                "    {}::{}: {:?}",
+                test.classname, test.name, test.status
+            )?;
+            if let Some(message) = &test.message {
+                for line in message.lines() {
+                    writeln!(out, "      {line}")?;
+                }
+            }
+        }
         if let Some(detail) = &run.detail {
             for line in detail.lines() {
                 writeln!(out, "    {line}")?;

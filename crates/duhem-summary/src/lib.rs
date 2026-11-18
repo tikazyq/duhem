@@ -38,7 +38,10 @@ pub use lifecycle::{
     LifecyclePhase, LifecycleRegistration, LifecycleScopeSegment, LifecycleStatus, LifecycleStep,
     LifecycleStepOutcome,
 };
-pub use native::{LayerTotals, NativeRunSummary, layer_totals};
+pub use native::{
+    LayerTotals, NativeRunSummary, NativeTestCounts, NativeTestResult, NativeTestStatus,
+    layer_totals,
+};
 
 /// One run's summary, serialized as one JSON line on the reporter
 /// subprocess's stdin. The schema is the externally-frozen plugin

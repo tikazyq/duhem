@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="2" failures="0" errors="0">
+  <testsuite name="package::lib" tests="2" time="0.015">
+    <testcase name="tests::passes" classname="package::lib" time="0.012"/>
+    <testcase name="tests::ignored" classname="package::lib" time="0"><skipped message="ignored"/></testcase>
+  </testsuite>
+</testsuites>

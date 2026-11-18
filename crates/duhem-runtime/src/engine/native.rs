@@ -7,7 +7,9 @@ use duhem_actions::{Action, ActionCtx, Invoke, Outcome};
 use duhem_evidence::{EventPayload, EvidenceWriter};
 use duhem_judge::{InconclusiveCause, VerdictState};
 use duhem_schema::{NativeOutputExpect, NativeRun};
-use duhem_summary::NativeRunSummary;
+use duhem_summary::{NativeRunSummary, NativeTestCounts, NativeTestStatus};
+
+mod junit;
 
 use super::EngineError;
 
@@ -59,6 +61,14 @@ pub(crate) async fn run_native(
             detail: None,
             stdout_blob_sha256: None,
             stderr_blob_sha256: None,
+            counts: None,
+            report_path: run
+                .report
+                .as_ref()
+                .map(|report| writer.mask_text(&report.path)),
+            report_blob_sha256: None,
+            results_blob_sha256: None,
+            failing_tests: vec![],
         };
         match executed {
             Err(error) => {
@@ -110,6 +120,68 @@ pub(crate) async fn run_native(
                 }
             }
         }
+        if let Some(report) = &run.report {
+            // A timed-out command may have written useful test records, but can
+            // never turn those partial records into a conclusive run outcome.
+            let timed_out = matches!(
+                result.outcome,
+                VerdictState::Inconclusive(InconclusiveCause::Timeout)
+            );
+            match tokio::fs::read_to_string(cwd.join(&report.path)).await {
+                Ok(source) => {
+                    result.report_blob_sha256 = Some(writer.write_blob(source.as_bytes()).await?.0);
+                    match junit::parse(&source, &run.id, |text| writer.mask_text(text)) {
+                        Ok(tests) => {
+                            let mut counts = NativeTestCounts::default();
+                            for test in &tests {
+                                match test.status {
+                                    NativeTestStatus::Passed => counts.passed += 1,
+                                    NativeTestStatus::Failed => counts.failed += 1,
+                                    NativeTestStatus::Errored => counts.errored += 1,
+                                    NativeTestStatus::Skipped => counts.skipped += 1,
+                                }
+                            }
+                            result.tests =
+                                counts.passed + counts.failed + counts.errored + counts.skipped;
+                            if !timed_out && counts.failed + counts.errored > 0 {
+                                result.outcome = VerdictState::Fail;
+                            }
+                            result.counts = Some(counts);
+                            let normalized =
+                                serde_json::to_vec(&tests).expect("test results serialize");
+                            result.results_blob_sha256 =
+                                Some(writer.write_blob(&normalized).await?.0);
+                            result.failing_tests = tests
+                                .into_iter()
+                                .filter(|test| {
+                                    matches!(
+                                        test.status,
+                                        NativeTestStatus::Failed | NativeTestStatus::Errored
+                                    )
+                                })
+                                .take(10)
+                                .map(|mut test| {
+                                    test.message = test
+                                        .message
+                                        .map(|message| message.chars().take(2048).collect());
+                                    test
+                                })
+                                .collect();
+                        }
+                        Err(error) => report_error(
+                            &mut result,
+                            writer.mask_text(&format!("malformed JUnit report: {error}")),
+                            timed_out,
+                        ),
+                    }
+                }
+                Err(error) => report_error(
+                    &mut result,
+                    writer.mask_text(&format!("cannot read JUnit report: {error}")),
+                    timed_out,
+                ),
+            }
+        }
         writer
             .append(EventPayload::NativeRunFinished {
                 result: result.clone(),
@@ -118,6 +190,14 @@ pub(crate) async fn run_native(
         results.push(result);
     }
     Ok(results)
+}
+
+fn report_error(result: &mut NativeRunSummary, detail: String, timed_out: bool) {
+    result.tests = 0;
+    if !timed_out {
+        result.outcome = VerdictState::Inconclusive(InconclusiveCause::EnvironmentError);
+        result.detail = Some(detail);
+    }
 }
 
 fn tail(text: &str) -> String {

@@ -93,11 +93,16 @@ pub fn validate_native(runs: &[NativeRun]) -> Result<(), String> {
                 run.id
             ));
         }
-        if run.report.is_some() {
-            return Err(format!(
-                "native run `{}`: report parsing not yet supported",
-                run.id
-            ));
+        if let Some(report) = &run.report {
+            if report.format == NativeReportFormat::Ctrf {
+                return Err(format!("native run `{}`: ctrf not yet supported", run.id));
+            }
+            if report.path.trim().is_empty() {
+                return Err(format!(
+                    "native run `{}`: report path must not be empty",
+                    run.id
+                ));
+            }
         }
         if let Some(expect) = &run.expect {
             for output in [&expect.stdout, &expect.stderr].into_iter().flatten() {
@@ -139,10 +144,13 @@ mod tests {
         let report =
             parse("- {id: x, command: ['true'], report: {format: junit, path: report.xml}}")
                 .unwrap();
+        validate_native(&report).unwrap();
+        let ctrf = parse("- {id: x, command: ['true'], report: {format: ctrf, path: report.json}}")
+            .unwrap();
         assert!(
-            validate_native(&report)
+            validate_native(&ctrf)
                 .unwrap_err()
-                .contains("report parsing not yet supported")
+                .contains("ctrf not yet supported")
         );
     }
     #[test]

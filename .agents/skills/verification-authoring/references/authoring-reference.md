@@ -27,7 +27,14 @@ See [Native runs](../../../../docs/native-runs.md) for the field reference.
 Use unique IDs and argv commands; optional `expect` matches stdout/stderr or sets
 an expected exit code. Required failures block the gate without changing criterion
 verdicts. Native outcomes cannot be referenced from assertions or expressions.
-Report parsing and native selection filters are deferred.
+Add `report: {format: junit, path: results.xml}` to read JUnit testcase results;
+`path` is relative to the command's `cwd`. Failures/errors fail the gate even on
+exit zero. Missing/malformed reports and timeouts are inconclusive. Exit/output
+expectations still apply; counts retain the reported test statuses after a command
+crash. Masked source XML and full normalized JSON results are evidence blobs;
+summary failures are limited to ten tests and 2,048 characters per message.
+`format: ctrf` is rejected with `ctrf not yet supported`. Native selection filters
+remain deferred.
 
 ## When to use this skill
 
