@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use duhem_actions::RunBrowser;
-use duhem_evidence::{RunLineage, RunOrigin, RunScope};
+use duhem_evidence::{RunLineage, RunOrigin, RunScope, Store};
 use duhem_judge::{RunVerdict, VerdictState, aggregate_run_set};
 use duhem_runtime::{Engine, RunOutcome, SuiteEnvironment, SuiteRunConfig};
 use duhem_schema::{
