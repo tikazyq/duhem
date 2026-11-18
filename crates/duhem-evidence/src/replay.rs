@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 use duhem_judge::{
     AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, RunVerdict, VerdictState,
-    aggregate_check, aggregate_criterion, aggregate_run,
+    aggregate_check, aggregate_criterion, aggregate_run, apply_inconclusive_policy,
 };
 use thiserror::Error;
 
@@ -91,7 +91,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     let mut cleanup_failed = false;
     let mut native_outcomes = Vec::new();
     let mut process_setup = crate::replay_process::ProcessSetup::default();
-    let mut saw_run_started = false;
+    let mut policy = None;
 
     // A step owner is stronger than the additive check_finished fallback,
     // regardless of event order. Preserve the existing hard error for two
@@ -122,11 +122,16 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
             EventPayload::NativeRunFinished { result } => {
                 native_outcomes.push((result.required, result.outcome))
             }
-            EventPayload::RunStarted { .. } => {
-                if saw_run_started {
+            EventPayload::RunStarted {
+                inconclusive_policy,
+                ..
+            } => {
+                if policy
+                    .replace(inconclusive_policy.unwrap_or_default())
+                    .is_some()
+                {
                     return Err(ReplayError::OutOfOrder("more than one run_started".into()));
                 }
-                saw_run_started = true;
             }
             EventPayload::StepStarted { .. } => {}
             EventPayload::AssertionEvaluated {
@@ -250,9 +255,7 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
         }
     }
 
-    if !saw_run_started {
-        return Err(ReplayError::MissingRunStarted);
-    }
+    let policy = policy.ok_or(ReplayError::MissingRunStarted)?;
     let recorded_run = recorded_run.ok_or(ReplayError::MissingRunFinished)?;
 
     // Trace completeness: every check whose assertions were observed
@@ -314,7 +317,8 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     for criterion_id in &criterion_order {
         let recorded = recorded_criteria[criterion_id];
         let checks = checks_by_criterion.remove(criterion_id).unwrap_or_default();
-        let state = aggregate_criterion(&checks);
+        let (state, _) =
+            apply_inconclusive_policy(criterion_id, aggregate_criterion(&checks), policy);
         if state != recorded {
             return Err(ReplayDivergence::Criterion {
                 criterion_id: criterion_id.clone(),

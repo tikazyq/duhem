@@ -429,6 +429,15 @@ async fn append_shared(
         if !secrets.is_empty() {
             let mut value = serde_json::to_value(&payload)?;
             secrets.mask_json(&mut value);
+            // A closed policy token is runtime metadata. A secret that happens
+            // to equal or occur in that token cannot change the judging policy.
+            if let EventPayload::RunStarted {
+                inconclusive_policy: Some(policy),
+                ..
+            } = &payload
+            {
+                value["inconclusive_policy"] = serde_json::to_value(policy)?;
+            }
             payload = serde_json::from_value(value)?;
         }
     }
@@ -531,11 +540,11 @@ pub fn run_started_with_definition_and_lineage(
     definition: Option<String>,
     lineage: RunLineage,
 ) -> EventPayload {
-    run_started_with_viewport(verification_path, inputs, definition, lineage, None)
+    run_started_with_viewport(verification_path, inputs, definition, lineage, None, None)
 }
 
-/// Build a self-describing run header with the effective browser
-/// viewport. `Some(null)` means a headed run tracks its real window;
+/// Build a run header with the effective browser viewport and judging policy.
+/// A viewport of `Some(null)` means a headed run tracks its real window;
 /// `None` is reserved for page-free and legacy runs.
 pub fn run_started_with_viewport(
     verification_path: impl Into<String>,
@@ -543,6 +552,7 @@ pub fn run_started_with_viewport(
     definition: Option<String>,
     lineage: RunLineage,
     viewport: Option<serde_json::Value>,
+    inconclusive_policy: Option<duhem_judge::InconclusivePolicy>,
 ) -> EventPayload {
     EventPayload::RunStarted {
         verification_path: verification_path.into(),
@@ -552,6 +562,7 @@ pub fn run_started_with_viewport(
         origin: lineage.origin,
         definition,
         viewport,
+        inconclusive_policy,
     }
 }
 

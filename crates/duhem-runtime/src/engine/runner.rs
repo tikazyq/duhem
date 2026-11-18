@@ -327,6 +327,7 @@ impl Engine {
                 self.definition_source.clone(),
                 self.lineage.clone(),
                 self.viewport.clone(),
+                Some(self.inconclusive_policy),
             ))
             .await?;
 

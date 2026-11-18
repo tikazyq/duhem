@@ -106,6 +106,14 @@ updates the golden in `bundle_contract.rs`, and lands with a
 coordinated hub-side change. Additive optional fields are allowed
 within a version; the hub must ignore unknown fields.
 
+Within v1, leaf runs record the effective `defaults.inconclusive_policy` in
+`events[].inconclusive_policy` on the `run_started` event. Values are `block`,
+`warn`, and `pass`. Replay verifies raw check verdicts, then applies the
+recorded policy to the recomputed criterion verdict before comparing it with
+`criterion_finished`. The policy can soften an inconclusive criterion only.
+If the field is absent, replay uses `block` regardless of the recorded verdict.
+Existing bundles retain their canonical bytes and hashes.
+
 The #650 extension adds optional `run.parent_run_id`, `run.origin`, `run.shard`,
 `run.manifest_digest` and `run.expected_partition` within v1. Old envelopes keep
 their exact canonical bytes; older readers ignore these fields. Each envelope

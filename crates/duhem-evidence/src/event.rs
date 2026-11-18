@@ -251,6 +251,9 @@ pub enum EventPayload {
         /// explicit JSON `null`. Absent only on older/page-free records.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         viewport: Option<serde_json::Value>,
+        /// Effective criterion policy. Absent on older traces, which replay as `block`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inconclusive_policy: Option<duhem_judge::InconclusivePolicy>,
     },
     /// Periodic proof that the runtime still owns this unterminated run.
     RunHeartbeat,
@@ -593,6 +596,7 @@ mod tests {
                 origin: None,
                 definition: None,
                 viewport: None,
+                inconclusive_policy: None,
             },
         };
         let line = serde_json::to_string(&evt).unwrap();
@@ -609,6 +613,7 @@ mod tests {
             None,
             crate::RunLineage::default(),
             Some(serde_json::json!({ "width": 1440, "height": 900 })),
+            None,
         );
         let window = crate::writer::run_started_with_viewport(
             "v.yml",
@@ -616,6 +621,7 @@ mod tests {
             None,
             crate::RunLineage::default(),
             Some(serde_json::Value::Null),
+            None,
         );
         let fixed_json = serde_json::to_value(fixed).unwrap();
         let window_json = serde_json::to_value(window).unwrap();

@@ -855,6 +855,7 @@ async fn run_detail_surfaces_recorded_viewport_metadata() {
         None,
         RunLineage::default(),
         Some(serde_json::json!({ "width": 1024, "height": 768 })),
+        None,
     ))
     .await
     .unwrap();

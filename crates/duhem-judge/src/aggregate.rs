@@ -139,12 +139,10 @@ pub fn aggregate_run(verdicts: Vec<CriterionVerdict>) -> RunVerdict {
 /// How a criterion-level `inconclusive` verdict is treated at run
 /// aggregation (manifest `defaults.inconclusive_policy`, spec #66).
 ///
-/// The judge owns the *meaning* of the policy; the schema owns its
-/// wire shape (`duhem_schema::InconclusivePolicy`). The runtime maps
-/// one to the other so this crate stays free of a schema dependency —
-/// the mechanical-judgment firewall (§11.2) keeps the verdict logic
-/// shippable on its own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// The runtime maps the manifest setting to this policy, and evidence
+/// records it so replay can use the same judge rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum InconclusivePolicy {
     /// Today's behavior: a criterion-level `inconclusive` stays
     /// `inconclusive` and does not pass.
