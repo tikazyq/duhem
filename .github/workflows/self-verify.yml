@@ -220,16 +220,17 @@ jobs:
           npm ci
           npx --yes playwright install --with-deps chromium
 
-      # `scripts/up.sh` reads DUHEM_BIN to produce the fixture run and to
-      # launch `duhem dashboard` (which resolves the sibling
-      # `duhem-dashboard`). A non-pass verdict exits non-zero.
+      # Keep this root out of the dashboard regression's single-root store.
       - name: Run automatic ingest worked verification
         run: |
           ./target/release/duhem run verifications/ingest-example \
-            --db .duhem/duhem.db \
+            --db .duhem/ingest-example.db \
             --inputs duhem_bin="$PWD/target/release/duhem" \
             --inputs dashboard_bin="$PWD/target/release/duhem-dashboard"
 
+      # `scripts/up.sh` reads DUHEM_BIN to produce the fixture run and to
+      # launch `duhem dashboard` (which resolves the sibling
+      # `duhem-dashboard`). A non-pass verdict exits non-zero.
       - name: Run duhem-dashboard regression VD
         env:
           DUHEM_BIN: ${{ github.workspace }}/target/release/duhem

@@ -228,10 +228,10 @@ fn validate(bundle: &RunBundle, hash: &str) -> Result<Vec<(String, Vec<u8>)>, In
         {
             return Err(invalid("terminal header mismatch"));
         }
-        if let Some(verdict) = run.verdict {
-            if crate::replay(&trace).map_err(invalid)?.run.state != verdict {
-                return Err(invalid("replayed verdict mismatch"));
-            }
+        if let Some(verdict) = run.verdict
+            && crate::replay(&trace).map_err(invalid)?.run.state != verdict
+        {
+            return Err(invalid("replayed verdict mismatch"));
         }
     } else if bundle.events.len() != 1
         || matches!(
