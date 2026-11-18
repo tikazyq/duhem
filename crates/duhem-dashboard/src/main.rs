@@ -35,6 +35,10 @@ struct Cli {
     #[arg(long = "host", value_name = "HOST", default_value = "127.0.0.1")]
     host: String,
 
+    /// Accept run bundles at POST /api/ingest. DUHEM_HUB_TOKEN protects writes.
+    #[arg(long)]
+    ingest: bool,
+
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -80,7 +84,21 @@ async fn run(cli: Cli) -> ExitCode {
         },
     };
 
-    // Read-only lens: the dashboard can never mutate the store.
+    let token = std::env::var("DUHEM_HUB_TOKEN")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let writer = if cli.ingest && cli.cmd.is_none() {
+        match SqliteStore::open(&db_path).await {
+            Ok(store) => Some(Arc::new(store)),
+            Err(error) => {
+                eprintln!("open ingest store: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
+    // Every browsing route still uses SQLite mode=ro.
     let store = match SqliteStore::open_read_only(&db_path).await {
         Ok(s) => s,
         Err(e) => {
@@ -108,7 +126,7 @@ async fn run(cli: Cli) -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        None => serve(reader, &db_path, &cli.host, cli.port).await,
+        None => serve(reader, &db_path, &cli.host, cli.port, writer, token).await,
     }
 }
 
@@ -117,6 +135,8 @@ async fn serve(
     db_path: &std::path::Path,
     host: &str,
     port: u16,
+    writer: Option<Arc<SqliteStore>>,
+    token: Option<String>,
 ) -> ExitCode {
     let listener = match tokio::net::TcpListener::bind((host, port)).await {
         Ok(l) => l,
@@ -125,6 +145,19 @@ async fn serve(
             return ExitCode::FAILURE;
         }
     };
+    if writer.is_some()
+        && token.is_none()
+        && !listener
+            .local_addr()
+            .is_ok_and(|address| address.ip().is_loopback())
+    {
+        eprintln!("ingest on a non-loopback address requires a non-empty DUHEM_HUB_TOKEN");
+        return ExitCode::FAILURE;
+    }
+    let mut app = router(reader);
+    if let Some(store) = writer {
+        app = app.merge(duhem_dashboard::ingest::router(store, token));
+    }
     let addr = listener
         .local_addr()
         .map(|a| a.to_string())
@@ -146,7 +179,7 @@ async fn serve(
         eprintln!("advertise {}: {e}", addr_file.display());
     }
 
-    let result = axum::serve(listener, router(reader))
+    let result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await;
     // Withdraw the advertisement on the way out (best-effort).

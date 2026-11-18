@@ -3,7 +3,50 @@
 Each CI machine runs the same `duhem run` with its own environment. Duhem
 partitions selected criteria and native runs locally; CI still starts the
 machines and gates their results. Each machine must have its own mutable test
-environment. Server aggregation and automatic upload are separate work.
+environment. Automatic delivery is available; server aggregation is a later slice.
+
+## Automatic delivery to a dashboard
+
+Start an ingest-enabled OSS dashboard and configure each runner with its exact
+ingest URL. The same configuration works for ordinary runs:
+
+```sh
+DUHEM_HUB_TOKEN=example-token duhem dashboard --ingest --db hub.db --host 127.0.0.1 --port 7878
+export DUHEM_HUB_URL=http://127.0.0.1:7878/api/ingest
+export DUHEM_HUB_TOKEN=example-token
+duhem run verifications/sharding-example --shard 1/2 --run-id example-invocation
+```
+
+The token is optional on loopback, but a non-loopback bind requires a non-empty
+`DUHEM_HUB_TOKEN`. Use HTTPS through your own proxy when sending tokens across
+networks. The flag enables writes only on `POST /api/ingest`; browsing remains
+read-only. Without the flag the endpoint does not exist. With no URL configured,
+execution and storage remain entirely local.
+
+After execution, Duhem sends the invocation's evidence tree parent-first. Each
+run is a separate v1 bundle with its own content hash. Ordinary manifest trees
+are `suite → leaf → nested invocation`; sharded manifest trees are
+`logical parent → shard suite → leaf → nested invocation`. Single-leaf shards
+omit the suite layer. Nested invocations defer shipping to their enclosing
+invocation, so a child never arrives before its parent. Only this invocation's
+descendants and required ancestors are sent, never unrelated runs in the store.
+Native report and parsed-result blobs are included alongside stdout/stderr.
+
+Each bundle gets one attempt, a 10 s request timeout, and the entire automatic
+tree gets at most 30 s including assembly. Delivery stops on its first failure,
+warns once on stderr, and leaves the verdict, stdout report and exit code intact.
+The receiver caps each envelope at 16 MiB. There is no splitting, retry queue or
+background delivery; `duhem ship <run-id> --db <path>` can resend a bundle.
+Identical resends are no-ops. Ingest validates headers, events and artifact
+references, replays judged streams, and commits receipts with all normal SQLite
+projections atomically.
+
+Logical parents from separate shards are accepted idempotently and stay
+unjudged. This slice does not aggregate shard verdicts, close logical parents,
+detect missing partitions, reconcile manifest digests across shards, publish
+combined statuses, or provide a queue. CI jobs still gate their own results.
+See the [bundle contract](run-bundle-contract.md) and the
+[worked ingest verification](../verifications/ingest-example/duhem.yml).
 
 ## Detection and overrides
 

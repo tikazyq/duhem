@@ -181,12 +181,13 @@ fn run_origin_token(origin: RunOrigin) -> &'static str {
     }
 }
 
-#[async_trait]
-impl Store for SqliteStore {
-    async fn begin_run(&self, meta: &RunMeta) -> Result<(), StoreError> {
+impl SqliteStore {
+    pub(super) async fn begin_run_tx(
+        tx: &mut sqlx::Transaction<'_, Sqlite>,
+        meta: &RunMeta,
+    ) -> Result<(), StoreError> {
         let name = verification_name(&meta.verification);
         let verification_id = verification_key(meta.scope.project_id.as_deref(), &name);
-        let mut tx = self.pool.begin().await?;
 
         // Fold the dimension rows first (idempotent identity upserts),
         // then the run row referencing them — one transaction, so the
@@ -196,7 +197,7 @@ impl Store for SqliteStore {
                 "INSERT OR IGNORE INTO projects (project_id, workspace_id) VALUES (?, 'local')",
             )
             .bind(project)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
         }
         sqlx::query(
@@ -207,7 +208,7 @@ impl Store for SqliteStore {
         .bind(&meta.scope.project_id)
         .bind(&name)
         .bind(&meta.verification)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
 
         sqlx::query(
@@ -230,15 +231,17 @@ impl Store for SqliteStore {
         .bind(&meta.scope.target_repo)
         .bind(&meta.scope.target_sha)
         .bind(meta.lineage.origin == Some(RunOrigin::Shard))
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-        tx.commit().await?;
         Ok(())
     }
 
-    async fn append_event(&self, run_id: &str, event: &Event) -> Result<(), StoreError> {
+    pub(super) async fn append_event_tx(
+        tx: &mut sqlx::Transaction<'_, Sqlite>,
+        run_id: &str,
+        event: &Event,
+    ) -> Result<(), StoreError> {
         let line = serde_json::to_string(event)?;
-        let mut tx = self.pool.begin().await?;
 
         sqlx::query("INSERT INTO events (run_id, seq, ts, kind, payload) VALUES (?, ?, ?, ?, ?)")
             .bind(run_id)
@@ -246,7 +249,7 @@ impl Store for SqliteStore {
             .bind(fmt_ts(&event.ts))
             .bind(event.payload.kind())
             .bind(&line)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
 
         // Fold the derived projection row, if this event carries one.
@@ -275,7 +278,7 @@ impl Store for SqliteStore {
                 .bind(*assertion_index as i64)
                 .bind(super::verdict_token(state)?)
                 .bind(detail)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
             }
             EventPayload::CheckFinished {
@@ -294,7 +297,7 @@ impl Store for SqliteStore {
                 )
                 .bind(run_id)
                 .bind(check_id)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await?
                 .flatten();
                 let criterion = step_criterion.or_else(|| criterion_id.clone());
@@ -306,7 +309,7 @@ impl Store for SqliteStore {
                 .bind(check_id)
                 .bind(criterion)
                 .bind(verdict_token(verdict)?)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
             }
             EventPayload::CriterionFinished {
@@ -319,7 +322,7 @@ impl Store for SqliteStore {
                 .bind(run_id)
                 .bind(criterion_id)
                 .bind(verdict_token(verdict)?)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
             }
             EventPayload::StepFinished {
@@ -348,7 +351,7 @@ impl Store for SqliteStore {
                 .bind(opener_kind)
                 .bind(*step_index as i64)
                 .bind(event.seq as i64)
-                .fetch_optional(&mut *tx)
+                .fetch_optional(&mut **tx)
                 .await?;
                 if let Some((opener_seq, payload)) = opener {
                     let opener_evt: serde_json::Value = serde_json::from_str(&payload)?;
@@ -371,7 +374,7 @@ impl Store for SqliteStore {
                         .bind(layer)
                         .bind(ok as i64)
                         .bind(detail)
-                        .execute(&mut *tx)
+                        .execute(&mut **tx)
                         .await?;
                     }
                 }
@@ -380,7 +383,7 @@ impl Store for SqliteStore {
                 let started_at: Option<String> =
                     sqlx::query_scalar("SELECT started_at FROM runs WHERE run_id = ?")
                         .bind(run_id)
-                        .fetch_optional(&mut *tx)
+                        .fetch_optional(&mut **tx)
                         .await?;
                 let started_at =
                     started_at.ok_or_else(|| StoreError::UnknownRun(run_id.to_string()))?;
@@ -396,7 +399,7 @@ impl Store for SqliteStore {
                     .bind(verdict_token(verdict)?)
                     .bind(fmt_ts(&event.ts))
                     .bind(duration_ms)
-                    .execute(&mut *tx)
+                    .execute(&mut **tx)
                     .await?;
                 }
                 sqlx::query(
@@ -406,14 +409,14 @@ impl Store for SqliteStore {
                 .bind(run_id)
                 .bind(fmt_ts(&event.ts))
                 .bind(duration_ms)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
             }
             EventPayload::RunAborted { .. } => {
                 let started_at: Option<String> =
                     sqlx::query_scalar("SELECT started_at FROM runs WHERE run_id = ?")
                         .bind(run_id)
-                        .fetch_optional(&mut *tx)
+                        .fetch_optional(&mut **tx)
                         .await?;
                 let started_at =
                     started_at.ok_or_else(|| StoreError::UnknownRun(run_id.to_string()))?;
@@ -427,12 +430,28 @@ impl Store for SqliteStore {
                 .bind(run_id)
                 .bind(fmt_ts(&event.ts))
                 .bind(duration_ms)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
             }
             _ => {}
         }
 
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Store for SqliteStore {
+    async fn begin_run(&self, meta: &RunMeta) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await?;
+        Self::begin_run_tx(&mut tx, meta).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn append_event(&self, run_id: &str, event: &Event) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await?;
+        Self::append_event_tx(&mut tx, run_id, event).await?;
         tx.commit().await?;
         Ok(())
     }

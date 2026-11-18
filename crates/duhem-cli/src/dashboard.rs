@@ -49,6 +49,9 @@ pub struct DashboardOpts {
     /// Listen host (serve mode; default 127.0.0.1).
     #[arg(long = "host", value_name = "HOST")]
     pub host: Option<String>,
+    /// Accept run bundles at POST /api/ingest (DUHEM_HUB_TOKEN protects writes).
+    #[arg(long)]
+    pub ingest: bool,
     #[command(subcommand)]
     pub cmd: Option<DashboardCmd>,
 }
@@ -69,6 +72,7 @@ pub struct DashboardArgs {
     pub db: Option<PathBuf>,
     pub port: Option<u16>,
     pub host: Option<String>,
+    pub ingest: bool,
     /// `Some(out)` selects export mode.
     pub export_out: Option<PathBuf>,
 }
@@ -79,12 +83,14 @@ impl From<DashboardOpts> for DashboardArgs {
             db,
             port,
             host,
+            ingest,
             cmd,
         } = opts;
         DashboardArgs {
             db,
             port,
             host,
+            ingest,
             export_out: cmd.map(|DashboardCmd::Export { out }| out),
         }
     }
@@ -103,6 +109,9 @@ pub fn forward_args(args: &DashboardArgs) -> Vec<String> {
             argv.push(out.display().to_string());
         }
         None => {
+            if args.ingest {
+                argv.push("--ingest".into());
+            }
             if let Some(port) = args.port {
                 argv.push("--port".into());
                 argv.push(port.to_string());
@@ -187,6 +196,7 @@ mod tests {
             db: Some(PathBuf::from("state/duhem.db")),
             port: Some(8080),
             host: Some("0.0.0.0".into()),
+            ingest: false,
             export_out: None,
         };
         assert_eq!(
@@ -205,6 +215,7 @@ mod tests {
             db: None,
             port: Some(8080), // serve-only flag: not forwarded in export mode
             host: None,
+            ingest: false,
             export_out: Some(PathBuf::from("site/")),
         };
         assert_eq!(forward_args(&export), vec!["export", "--out", "site/"]);

@@ -114,7 +114,7 @@ self-consistent Duhem contract — not where the VD file lives. In Mode A
 the product legitimately owns its VD and gates its own PRs on it; the
 lightweight guard against silent self-weakening is a CODEOWNERS stanza
 on `/.duhem/` routing VD edits to a verifier reviewer, plus
-hub-recorded verdicts (`duhem ship`) that a product PR can't rewrite.
+hub-recorded verdicts (automatic delivery with `DUHEM_HUB_URL`) that a product PR can't rewrite.
 A drop-in `.duhem/` skeleton + CODEOWNERS + Mode A CI snippet lives in
 [`templates/product-repo/`](../../../templates/product-repo/).
 
@@ -122,8 +122,10 @@ Mode A adopters who want no GitHub Action at all can skip this action
 entirely and run the CLI directly in their CI —
 `duhem run .duhem/duhem.yml` resolves workspace-local paths natively.
 The action's value over direct-CLI is the batteries (Node + Chromium
-setup, verdict parsing, opt-in hub shipping), which matter most for
-UI-heavy suites.
+setup and verdict parsing), which matter most for UI-heavy suites. Configure
+`DUHEM_HUB_URL` and optional `DUHEM_HUB_TOKEN` in the caller's environment for
+automatic evidence-tree delivery; the CLI handles this for direct runs too.
+The OSS dashboard receives bundles at `/api/ingest` when started with `--ingest`.
 
 **Mode B** (Duhem's dogfood CI monitors drift by running a product's
 co-located suite with a freshly-built `duhem`) does not use this action

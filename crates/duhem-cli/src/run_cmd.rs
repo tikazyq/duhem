@@ -435,6 +435,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     let db_path = run_store.db_path;
     let store = run_store.store;
     let invocation_parent = run_store.parent;
+    let nested = invocation_parent.is_some();
+    let mut delivery_roots = Vec::new();
+    let result = async {
 
     // Live on-ramp (#298): if a dashboard is serving this store (or
     // the operator exported DUHEM_DASHBOARD_URL), each leaf's live
@@ -503,6 +506,7 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         };
         let suite_run_id = duhem_evidence::new_run_id();
         suite_parent_id = Some(suite_run_id.clone());
+        delivery_roots.push(suite_run_id.clone());
         if let Some(base) = dashboard_base.as_deref() {
             let url = crate::live_link::run_page_url(base, &suite_run_id);
             eprintln!("live: {url}");
@@ -791,14 +795,10 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         }
         engine = engine.with_store(store.clone());
         // Run-id pinning: an operator `--run-id` wins; otherwise, when
-        // a live link is printable, mint the id here (the same ULID
-        // mint the engine would run) so the URL exists before the run
-        // does. With no dashboard in sight the engine mints as before.
-        let run_id: Option<String> = match pinned_run_id.as_deref() {
-            Some(id) => Some(id.to_string()),
-            None if dashboard_base.is_some() => Some(duhem_evidence::new_run_id()),
-            None => None,
-        };
+        // a live link is printable, the URL exists before execution.
+        // Minting here also tracks this invocation's delivery roots.
+        let run_id = Some(pinned_run_id.clone().unwrap_or_else(duhem_evidence::new_run_id));
+        delivery_roots.push(run_id.as_ref().expect("assigned run id").clone());
         if let Some(id) = run_id.as_deref() {
             engine = engine.with_run_id(id);
         }
@@ -1011,6 +1011,11 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         VerdictState::Pass => ExitCode::SUCCESS,
         _ => ExitCode::FAILURE,
     }
+    }.await;
+    if !nested {
+        crate::export_cmd::deliver_tree(store.as_ref(), &delivery_roots).await;
+    }
+    result
 }
 
 /// Tear the suite environment down, narrating its `env:` events live

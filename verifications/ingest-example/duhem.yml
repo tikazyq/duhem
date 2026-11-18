@@ -1,0 +1,23 @@
+# Self-regression: real CLI, dashboard HTTP endpoint and SQLite; no mock receiver.
+verification: Automatic run delivery to the OSS dashboard
+spec_ref: https://github.com/onsager-ai/duhem/issues/663
+inputs:
+  duhem_bin:
+    type: string
+    default: duhem
+  dashboard_bin:
+    type: string
+    default: duhem-dashboard
+criteria:
+  - id: INGEST
+    description: Completed verification evidence arrives at the configured dashboard unchanged, and duplicate delivery does not create another run.
+    checks:
+      - id: deliver-and-resend
+        steps:
+          - id: exercise
+            uses: cli/invoke
+            with:
+              command: [python3, -I, verifications/ingest-example/exercise.py, $inputs.duhem_bin, $inputs.dashboard_bin]
+        assertions:
+          - $steps.exercise.outputs.exit_code == 0
+          - matches: {value: $steps.exercise.outputs.stdout, pattern: 'delivered and deduplicated'}

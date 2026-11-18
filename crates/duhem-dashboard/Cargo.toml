@@ -26,6 +26,7 @@ futures = { workspace = true }
 rust-embed = { workspace = true }
 
 [dev-dependencies]
+sqlx.workspace = true
 tower = { workspace = true, features = ["util"] }
 tempfile = "3"
 http-body-util = "0.1"

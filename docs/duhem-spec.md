@@ -1851,11 +1851,26 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
   handle
 - Portable via `duhem export` (self-contained per-run bundle)
 
+> **Alignment note (#663 — explicit replication).** The default dashboard
+> remains a read-only lens. `--ingest` adds a separate write connection solely
+> for validated replication: received judged events are replayed through the
+> deterministic judge and committed with their projections and receipt in one
+> transaction. It does not execute checks or accept a supplied summary as a
+> verdict. This narrow opt-in extends the historical sole-writer posture to
+> evidence replication without changing independent verification.
+
 #### Distributed run aggregation
 
 When `DUHEM_HUB_URL` points to a Duhem server, each `duhem run` sends its completed run tree automatically using the existing run-bundle contract (`docs/run-bundle-contract.md`). Bundles are content-hash idempotent, making identical retries safe. The OSS dashboard exposes the ingest endpoint used by the hosted hub, so both use one contract.
 
 The server creates the logical parent idempotently on first arrival and replays the event stream to recompute child and parent verdicts; it never trusts a shard's supplied summary. The parent remains `pending` until every expected shard arrives. If a shard never arrives or CI ends without it, the parent is `inconclusive` and names the missing units according to the claim-scope rule (#531); missing work never counts as a pass. The server rejects shards with a mismatched manifest digest or shard count under one run ID, and rejects conflicting duplicates. An identical resend is a no-op. It serves the aggregated report, totals, and failure envelope through the existing dashboard and `/failure` endpoints. Any combined commit status is informational; CI's parallel jobs remain the merge gate.
+
+Implementation slice #663 provides automatic parent-first delivery and opt-in
+OSS dashboard ingest using v1 envelopes, with a 16 MiB request limit, 10 s
+request timeout and 30 s automatic-tree deadline. Logical parents are accepted
+idempotently and remain unjudged. The cross-shard aggregation, missing-unit
+handling and combined views described above remain later work; see
+[distributed runs](distributed-runs.md) for the shipped configuration and bounds.
 
 Without a configured server, each shard records locally as today. Its result and the CI gate are unaffected; only the combined view is absent. A future queue mode may let CI-started machines claim units atomically from the server, with fixed partition as fallback; queue mode is not part of this design.
 

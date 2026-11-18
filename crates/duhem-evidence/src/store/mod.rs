@@ -15,8 +15,11 @@
 //! [`Store::run_events`] / [`Store::events_after`] /
 //! [`Store::get_blob`].
 
+mod ingest;
 mod location;
 mod sqlite;
+
+pub use ingest::IngestError;
 
 pub use location::{dashboard_addr_path, project_db_path, project_slug, state_root};
 pub use sqlite::SqliteStore;

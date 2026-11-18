@@ -10,7 +10,11 @@
 //! the judge (via the runtime) is its sole writer, the dashboard is a
 //! read-only lens, and `duhem export` is the portability path.
 //!
-//! Three surfaces:
+//! With explicit `--ingest`, a separate writable connection replicates
+//! validated run bundles atomically after deterministic replay. Browsing
+//! retains the read-only handle; no check execution happens in the server.
+//!
+//! Three browsing surfaces:
 //! - [`server::router`] — the JSON API + embedded SPA (serve mode);
 //! - [`live::live_stream`] — replay-then-follow SSE over a run's
 //!   event stream (#84);
@@ -18,6 +22,7 @@
 //!   upload from CI (#87).
 
 pub mod export;
+pub mod ingest;
 pub mod live;
 pub mod model;
 pub mod reader;
