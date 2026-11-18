@@ -752,6 +752,9 @@ export function VerdictBand({
             >
               {run.run_id}
             </code>
+            {run.branch && <span className="text-xs text-muted-foreground">{run.branch}</span>}
+            {run.pr && <span className="text-xs text-muted-foreground">PR #{run.pr}</span>}
+            {run.ci_url && <a href={run.ci_url} target="_blank" rel="noreferrer" className="text-xs hover:underline">CI ↗</a>}
             {run.status === "running" && (
               <span className="text-xs text-muted-foreground">{connection}</span>
             )}

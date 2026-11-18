@@ -202,6 +202,18 @@ const columns: ColumnDef<RunsListEntry>[] = [
     ),
   },
   {
+    id: "ci",
+    header: "CI context",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <div className="flex flex-wrap gap-x-2 text-xs break-words">
+        {row.original.branch && <span>{row.original.branch}</span>}
+        {row.original.pr && <span>PR #{row.original.pr}</span>}
+        {row.original.ci_url && <a href={row.original.ci_url} target="_blank" rel="noreferrer" className="hover:underline">CI ↗</a>}
+      </div>
+    ),
+  },
+  {
     id: "started",
     accessorFn: (r) => (r.started_at ? Date.parse(r.started_at) || 0 : 0),
     header: ({ column }) => <SortHeader column={column}>Started</SortHeader>,
@@ -371,6 +383,14 @@ export default function RunsList() {
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
   const view = runsView(params.get("view"));
+  const repo = params.get("repo") ?? "";
+  const branch = params.get("branch") ?? "";
+  const pr = params.get("pr") ?? "";
+  const scopedRuns = useMemo(() => (runs ?? []).filter((entry) =>
+    (!repo || entry.target_repo === repo) &&
+    (!branch || entry.branch === branch) &&
+    (!pr || entry.pr === pr),
+  ), [runs, repo, branch, pr]);
 
   const verifications = useMemo(
     () =>
@@ -382,10 +402,10 @@ export default function RunsList() {
 
   const filteredLeaves = useMemo(
     () =>
-      flatLeaves(runs ?? []).filter((entry) =>
+      flatLeaves(scopedRuns).filter((entry) =>
         matchesFilters(entry, verification, verdicts, statuses, from, to),
       ),
-    [runs, verification, verdicts, statuses, from, to],
+    [scopedRuns, verification, verdicts, statuses, from, to],
   );
   const filteredGroups = useMemo(
     () => {
@@ -405,11 +425,11 @@ export default function RunsList() {
           kind: children.length > 0 ? "run-set" : "leaf",
         };
       };
-      return (runs ?? [])
+      return scopedRuns
         .map(filterTree)
         .filter((entry): entry is RunsListEntry => entry !== null);
     },
-    [runs, verification, verdicts, statuses, from, to],
+    [scopedRuns, verification, verdicts, statuses, from, to],
   );
 
   const update = (mutate: (p: URLSearchParams) => void) => {
@@ -424,6 +444,7 @@ export default function RunsList() {
     setParams(next, { replace: true });
   };
   const hasFilters =
+    Boolean(repo || branch || pr) ||
     Boolean(verification) ||
     verdicts.length > 0 ||
     statuses.length > 0 ||
@@ -472,6 +493,16 @@ export default function RunsList() {
       </nav>
 
       <div className="flex flex-wrap items-center gap-2">
+        {(["repo", "branch", "pr"] as const).map((key) => (
+          <Input
+            key={key}
+            aria-label={key}
+            placeholder={key === "pr" ? "PR number" : key === "repo" ? "Target repository" : "Branch"}
+            value={params.get(key) ?? ""}
+            className="h-8 w-[13rem]"
+            onChange={(e) => update((p) => e.target.value ? p.set(key, e.target.value) : p.delete(key))}
+          />
+        ))}
         <Select
           value={verification || ALL}
           onValueChange={(v) =>

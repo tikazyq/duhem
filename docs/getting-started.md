@@ -604,7 +604,11 @@ which stays on your side (local or CI), never in the server.
   verdict; the `duhem/run` composite action wraps this. Set `DUHEM_SERVER_URL`
   and `DUHEM_SERVER_TOKEN` to upload evidence and print a server link. GitHub
   Actions also gets a job summary with the verdict, counts and link; sharded
-  jobs link to the combined run. See the [CI recipes](./distributed-runs.md#ci-recipes).
+  jobs link to the combined run. Runs automatically record branch, PR and pipeline
+  URL from GitHub Actions, GitLab CI or Buildkite. Set `DUHEM_BRANCH`, `DUHEM_PR`
+  or `DUHEM_CI_URL` to override a value. The dashboard shows this context and lets
+  you bookmark exact target-repository, branch and PR filters. See
+  [CI context](./distributed-runs.md#ci-context) and the [CI recipes](./distributed-runs.md#ci-recipes).
 - **The full model.** [`docs/duhem-spec.md`](./duhem-spec.md) —
   especially §7 (Core Concepts) and §8 (Holistic Verification).
 

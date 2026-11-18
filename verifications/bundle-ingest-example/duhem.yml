@@ -47,9 +47,25 @@ criteria:
               env:
                 DUHEM_SERVER_URL: $inputs.server_url
                 DUHEM_SERVER_TOKEN: example-token
+                DUHEM_TARGET_REPO: github.com/example/ci-app
+                DUHEM_BRANCH: feature/ci-context
+                DUHEM_PR: "42"
+                DUHEM_CI_URL: https://ci.example/runs/123
           - id: received
             uses: api/call
             with: {method: GET, url: $inputs.url}
+          - id: ci_context
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.url
+              query: {repo: github.com/example/ci-app, branch: feature/ci-context, pr: "42"}
+          - id: ci_no_match
+            uses: api/call
+            with:
+              method: GET
+              url: $inputs.url
+              query: {repo: github.com/example/ci-app, branch: absent-branch}
           - id: shard_one
             uses: cli/invoke
             with:
@@ -79,3 +95,10 @@ criteria:
           - $steps.run.outputs.exit_code == 0
           - $steps.received.outputs.status == 200
           - $steps.received.outputs.body[0].verdict == "pass"
+          - $steps.ci_context.outputs.status == 200
+          - $runtime.len($steps.ci_context.outputs.body) == 1
+          - $steps.ci_context.outputs.body[0].target_repo == "github.com/example/ci-app"
+          - $steps.ci_context.outputs.body[0].branch == "feature/ci-context"
+          - $steps.ci_context.outputs.body[0].pr == "42"
+          - $steps.ci_context.outputs.body[0].ci_url == "https://ci.example/runs/123"
+          - $runtime.len($steps.ci_no_match.outputs.body) == 0

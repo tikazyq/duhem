@@ -74,6 +74,120 @@ async fn runs_list_single_leaf_run() {
 }
 
 #[tokio::test]
+async fn ci_filters_match_roots_exactly_and_preserve_all_descendants() {
+    let (_tmp, rw, ro) = common::open_stores().await;
+    for (id, parent, repo, branch, pr) in [
+        (
+            "root",
+            None,
+            Some("github.com/acme/app"),
+            Some("feature/ci"),
+            Some("42"),
+        ),
+        ("child", Some("root"), None, None, None),
+        (
+            "grandchild",
+            Some("child"),
+            Some("other"),
+            Some("other"),
+            Some("99"),
+        ),
+        (
+            "other-root",
+            None,
+            Some("github.com/acme/app"),
+            Some("main"),
+            Some("43"),
+        ),
+        ("unattributed", None, None, None, None),
+    ] {
+        let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
+            rw.clone(),
+            id,
+            "x.yml",
+            BTreeMap::new(),
+            RunScope {
+                target_repo: repo.map(str::to_owned),
+                branch: branch.map(str::to_owned),
+                pr: pr.map(str::to_owned),
+                ci_url: (id == "root").then(|| "https://ci.example/123".into()),
+                ..RunScope::default()
+            },
+            RunLineage {
+                parent_run_id: parent.map(str::to_owned),
+                origin: parent.map(|_| RunOrigin::Suite),
+            },
+            SecretRegistry::new(),
+        )
+        .await
+        .unwrap();
+        writer
+            .append(run_started_with_definition_and_lineage(
+                "x.yml",
+                BTreeMap::new(),
+                None,
+                RunLineage {
+                    parent_run_id: parent.map(str::to_owned),
+                    origin: parent.map(|_| RunOrigin::Suite),
+                },
+            ))
+            .await
+            .unwrap();
+        writer
+            .append(EventPayload::RunFinished {
+                body_verdict: None,
+                verdict: None,
+            })
+            .await
+            .unwrap();
+        writer.finish().await.unwrap();
+    }
+    let reader = EvidenceReader::new(ro);
+    for suffix in ["", ".json"] {
+        for query in [
+            "branch=feature%2Fci",
+            "pr=42",
+            "repo=github.com%2Facme%2Fapp&branch=feature%2Fci&pr=42",
+        ] {
+            let (status, json) =
+                get_json(reader.clone(), &format!("/api/runs{suffix}?{query}")).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(json.as_array().unwrap().len(), 1);
+            assert_eq!(json[0]["run_id"], "root");
+            assert_eq!(json[0]["children"][0]["run_id"], "child");
+            assert_eq!(
+                json[0]["children"][0]["children"][0]["run_id"],
+                "grandchild"
+            );
+            assert_eq!(json[0]["ci_url"], "https://ci.example/123");
+        }
+        let (_, json) = get_json(
+            reader.clone(),
+            &format!("/api/runs{suffix}?repo=github.com%2Facme%2Fapp"),
+        )
+        .await;
+        assert_eq!(json.as_array().unwrap().len(), 2);
+        for query in [
+            "branch=feature",
+            "pr=4",
+            "repo=app",
+            "branch=main&pr=42",
+            "pr=99",
+        ] {
+            let (status, json) =
+                get_json(reader.clone(), &format!("/api/runs{suffix}?{query}")).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(json, serde_json::json!([]));
+        }
+    }
+    let (_, detail) = get_json(reader, "/api/runs/root").await;
+    assert_eq!(detail["branch"], "feature/ci");
+    assert_eq!(detail["pr"], "42");
+    assert_eq!(detail["target_repo"], "github.com/acme/app");
+    assert_eq!(detail["ci_url"], "https://ci.example/123");
+}
+
+#[tokio::test]
 async fn check_artifact_surfaces_secret_mask_occurrence_counts() {
     let (_tmp, rw, ro) = common::open_stores().await;
     let run_id = "01J0000000000000000000000S";

@@ -84,8 +84,25 @@ fn strip_json_suffix(s: &str) -> &str {
     s.strip_suffix(".json").unwrap_or(s)
 }
 
-async fn list_runs(State(reader): State<EvidenceReader>) -> Response {
-    match reader.list().await {
+#[derive(serde::Deserialize)]
+struct RunsQuery {
+    repo: Option<String>,
+    branch: Option<String>,
+    pr: Option<String>,
+}
+
+async fn list_runs(
+    State(reader): State<EvidenceReader>,
+    axum::extract::Query(query): axum::extract::Query<RunsQuery>,
+) -> Response {
+    match reader
+        .list_filtered(
+            query.repo.as_deref(),
+            query.branch.as_deref(),
+            query.pr.as_deref(),
+        )
+        .await
+    {
         Ok(list) => axum::Json(list).into_response(),
         Err(e) => e.into_response(),
     }

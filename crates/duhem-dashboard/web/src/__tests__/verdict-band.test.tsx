@@ -99,6 +99,13 @@ function stubFetch(checkDetail: CheckDetail = FAILED_CHECK) {
   return fetchMock;
 }
 
+it("shows branch, PR and CI link in the run header", () => {
+  renderBand(run({ branch: "feature/ci", pr: "42", ci_url: "https://ci.example/123" }));
+  expect(screen.getByText("feature/ci")).toBeTruthy();
+  expect(screen.getByText("PR #42")).toBeTruthy();
+  expect(screen.getByRole("link", { name: "CI ↗" }).getAttribute("href")).toBe("https://ci.example/123");
+});
+
 function renderBand(detail: RunDetail, props: { collapsed?: boolean } = {}) {
   return render(
     <MemoryRouter>

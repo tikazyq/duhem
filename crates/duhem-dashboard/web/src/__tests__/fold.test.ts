@@ -22,6 +22,13 @@ const trace: TraceEvent[] = [
 ];
 
 describe("foldRun", () => {
+  it("retains fetched CI context throughout live event updates", () => {
+    const context = { target_repo: "github.com/acme/app", branch: "feature/ci", pr: "42", ci_url: "https://ci.example/123" };
+    const fetched = { ...foldRun("r1", []), ...context };
+    for (let count = 1; count <= trace.length; count++) {
+      expect(carryFetched(foldRun("r1", trace.slice(0, count)), fetched)).toMatchObject(context);
+    }
+  });
   it("is running with no verdict until run_finished arrives", () => {
     const partial = foldRun("r1", trace.slice(0, 4));
     expect(partial.status).toBe("running");

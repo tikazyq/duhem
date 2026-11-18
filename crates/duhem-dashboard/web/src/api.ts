@@ -13,6 +13,10 @@ export type RunStatus = "pending" | "running" | "finished" | "aborted" | "orphan
 export interface RunsListEntry {
   run_id: string;
   verification: string;
+  target_repo?: string;
+  branch?: string;
+  pr?: string;
+  ci_url?: string;
   started_at: string | null;
   duration_ms: number | null;
   verdict: Verdict | null;
@@ -123,6 +127,10 @@ export interface RunDetail {
   body_verdict?: Verdict;
   run_id: string;
   verification: string;
+  target_repo?: string;
+  branch?: string;
+  pr?: string;
+  ci_url?: string;
   started_at: string | null;
   duration_ms?: number | null;
   children?: RunChildDetail[];

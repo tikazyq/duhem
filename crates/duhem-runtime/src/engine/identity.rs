@@ -3,7 +3,8 @@
 //!
 //! **Target** (what the run verifies): declared `project:` → CI
 //! context (`DUHEM_TARGET_REPO`/`DUHEM_TARGET_SHA`, else
-//! `GITHUB_REPOSITORY` + `GITHUB_SHA`) → normalized `origin` remote
+//! `GITHUB_REPOSITORY` + `GITHUB_SHA`, then GitLab/Buildkite repo
+//! context) → normalized `origin` remote
 //! of the working copy → canonical-path fallback. **Verifier** (where
 //! the VD lives): `DUHEM_VERIFIER_REPO`/`DUHEM_VERIFIER_SHA` → git
 //! context of the VD's directory. Identity never derives from a root
@@ -96,6 +97,16 @@ pub(crate) fn resolve_scope_with(
                 .env("GITHUB_REPOSITORY")
                 .map(|r| format!("github.com/{r}"))
         })
+        .or_else(|| {
+            source
+                .env("CI_PROJECT_URL")
+                .and_then(|r| normalize_remote(&r))
+        })
+        .or_else(|| {
+            source
+                .env("BUILDKITE_REPO")
+                .and_then(|r| normalize_remote(&r))
+        })
         .filter(|v| !v.is_empty());
     let ci_sha = source
         .env("DUHEM_TARGET_SHA")
@@ -139,6 +150,44 @@ pub(crate) fn resolve_scope_with(
         verifier_sha,
         target_repo,
         target_sha,
+        branch: source.env("DUHEM_BRANCH").or_else(|| {
+            source
+                .env("GITHUB_HEAD_REF")
+                .or_else(|| source.env("GITHUB_REF_NAME"))
+                .or_else(|| source.env("CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"))
+                .or_else(|| source.env("CI_COMMIT_REF_NAME"))
+                .or_else(|| source.env("BUILDKITE_BRANCH"))
+        }),
+        pr: source.env("DUHEM_PR").or_else(|| {
+            source
+                .env("GITHUB_REF")
+                .and_then(|r| {
+                    let mut parts = r.split('/');
+                    (parts.next() == Some("refs") && parts.next() == Some("pull"))
+                        .then(|| parts.next().map(str::to_owned))
+                        .flatten()
+                })
+                .or_else(|| source.env("CI_MERGE_REQUEST_IID"))
+                .or_else(|| {
+                    source
+                        .env("BUILDKITE_PULL_REQUEST")
+                        .filter(|v| v != "false")
+                })
+        }),
+        ci_url: source.env("DUHEM_CI_URL").or_else(|| {
+            source
+                .env("GITHUB_RUN_ID")
+                .and_then(|id| {
+                    let repo = source.env("GITHUB_REPOSITORY")?;
+                    let server = source.env("GITHUB_SERVER_URL")?;
+                    Some(format!(
+                        "{}/{repo}/actions/runs/{id}",
+                        server.trim_end_matches('/')
+                    ))
+                })
+                .or_else(|| source.env("CI_PIPELINE_URL"))
+                .or_else(|| source.env("BUILDKITE_BUILD_URL"))
+        }),
     }
 }
 
@@ -306,6 +355,156 @@ mod tests {
             Some("github.com/onsager-ai/duhem")
         );
         assert_eq!(scope.verifier_sha.as_deref(), Some("duhemsha"));
+    }
+
+    #[test]
+    fn ci_context_provider_detection_and_override_precedence() {
+        type CiCase<'a> = (&'a [(&'a str, &'a str)], &'a str, Option<&'a str>, &'a str);
+        let providers: &[CiCase<'_>] = &[
+            (
+                &[
+                    ("GITHUB_HEAD_REF", "feature"),
+                    ("GITHUB_REF_NAME", "42/merge"),
+                    ("GITHUB_REF", "refs/pull/42/merge"),
+                    ("GITHUB_SERVER_URL", "https://github.com"),
+                    ("GITHUB_REPOSITORY", "acme/app"),
+                    ("GITHUB_RUN_ID", "123"),
+                ],
+                "feature",
+                Some("42"),
+                "https://github.com/acme/app/actions/runs/123",
+            ),
+            (
+                &[
+                    ("GITHUB_REF_NAME", "main"),
+                    ("GITHUB_REF", "refs/heads/main"),
+                    ("GITHUB_SERVER_URL", "https://github.example/"),
+                    ("GITHUB_REPOSITORY", "acme/app"),
+                    ("GITHUB_RUN_ID", "123"),
+                ],
+                "main",
+                None,
+                "https://github.example/acme/app/actions/runs/123",
+            ),
+            (
+                &[
+                    ("CI_MERGE_REQUEST_SOURCE_BRANCH_NAME", "feature"),
+                    ("CI_COMMIT_REF_NAME", "main"),
+                    ("CI_MERGE_REQUEST_IID", "42"),
+                    (
+                        "CI_PIPELINE_URL",
+                        "https://gitlab.com/acme/app/-/pipelines/123",
+                    ),
+                ],
+                "feature",
+                Some("42"),
+                "https://gitlab.com/acme/app/-/pipelines/123",
+            ),
+            (
+                &[
+                    ("CI_COMMIT_REF_NAME", "main"),
+                    ("CI_PIPELINE_URL", "https://gitlab.com/p/123"),
+                ],
+                "main",
+                None,
+                "https://gitlab.com/p/123",
+            ),
+            (
+                &[
+                    ("BUILDKITE_BRANCH", "feature"),
+                    ("BUILDKITE_PULL_REQUEST", "42"),
+                    (
+                        "BUILDKITE_BUILD_URL",
+                        "https://buildkite.com/acme/app/builds/123",
+                    ),
+                ],
+                "feature",
+                Some("42"),
+                "https://buildkite.com/acme/app/builds/123",
+            ),
+            (
+                &[
+                    ("BUILDKITE_BRANCH", "main"),
+                    ("BUILDKITE_PULL_REQUEST", "false"),
+                    ("BUILDKITE_BUILD_URL", "https://buildkite.com/p/123"),
+                ],
+                "main",
+                None,
+                "https://buildkite.com/p/123",
+            ),
+        ];
+        let wd = Path::new("/work");
+        let missing = resolve_scope_with(&FakeSource::default(), None, wd, None);
+        assert_eq!(
+            (missing.branch, missing.pr, missing.ci_url),
+            (None, None, None)
+        );
+        for (vars, branch, pr, url) in providers {
+            let mut src = FakeSource::default();
+            for (key, value) in *vars {
+                src.env.insert((*key).into(), (*value).into());
+            }
+            let scope = resolve_scope_with(&src, None, wd, None);
+            assert_eq!(scope.branch.as_deref(), Some(*branch));
+            assert_eq!(scope.pr.as_deref(), *pr);
+            assert_eq!(scope.ci_url.as_deref(), Some(*url));
+            // Each explicit value wins independently of provider detection.
+            for (key, value) in [
+                ("DUHEM_BRANCH", "override"),
+                ("DUHEM_PR", "99"),
+                ("DUHEM_CI_URL", "https://ci/99"),
+            ] {
+                src.env.insert(key.into(), value.into());
+            }
+            let scope = resolve_scope_with(&src, None, wd, None);
+            assert_eq!(scope.branch.as_deref(), Some("override"));
+            assert_eq!(scope.pr.as_deref(), Some("99"));
+            assert_eq!(scope.ci_url.as_deref(), Some("https://ci/99"));
+        }
+    }
+
+    #[test]
+    fn gitlab_and_buildkite_repo_context_is_available_without_a_checkout() {
+        for (key, value) in [
+            ("CI_PROJECT_URL", "https://gitlab.com/acme/app"),
+            ("BUILDKITE_REPO", "git@github.com:acme/app.git"),
+        ] {
+            let mut src = FakeSource::default();
+            src.env.insert(key.into(), value.into());
+            let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+            let expected = if key == "CI_PROJECT_URL" {
+                "gitlab.com/acme/app"
+            } else {
+                "github.com/acme/app"
+            };
+            assert_eq!(scope.target_repo.as_deref(), Some(expected));
+            src.env
+                .insert("DUHEM_TARGET_REPO".into(), "override/repo".into());
+            let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+            assert_eq!(scope.target_repo.as_deref(), Some("override/repo"));
+        }
+    }
+
+    #[test]
+    fn provider_precedence_is_github_then_gitlab_then_buildkite() {
+        let mut src = FakeSource::default();
+        for (key, value) in [
+            ("GITHUB_REF_NAME", "github"),
+            ("GITHUB_REF", "refs/pull/1/merge"),
+            ("CI_COMMIT_REF_NAME", "gitlab"),
+            ("CI_MERGE_REQUEST_IID", "2"),
+            ("CI_PIPELINE_URL", "https://gitlab/p/2"),
+            ("BUILDKITE_BRANCH", "buildkite"),
+            ("BUILDKITE_PULL_REQUEST", "3"),
+            ("BUILDKITE_BUILD_URL", "https://buildkite/b/3"),
+        ] {
+            src.env.insert(key.into(), value.into());
+        }
+        let scope = resolve_scope_with(&src, None, Path::new("/work"), None);
+        assert_eq!(scope.branch.as_deref(), Some("github"));
+        assert_eq!(scope.pr.as_deref(), Some("1"));
+        // Missing GitHub URL components fall through to GitLab.
+        assert_eq!(scope.ci_url.as_deref(), Some("https://gitlab/p/2"));
     }
 
     #[test]

@@ -30,6 +30,14 @@ pub struct RunsListEntry {
     /// is addressable via `/api/runs/:run_id`.
     pub run_id: String,
     pub verification: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_repo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ci_url: Option<String>,
     pub started_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
     /// Judge-owned outcome. A finished unjudged run legitimately has
@@ -54,6 +62,14 @@ pub struct RunDetail {
     pub body_verdict: Option<VerdictState>,
     pub run_id: String,
     pub verification: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_repo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ci_url: Option<String>,
     pub started_at: Option<DateTime<Utc>>,
     pub duration_ms: Option<u64>,
     pub children: Vec<RunChildDetail>,

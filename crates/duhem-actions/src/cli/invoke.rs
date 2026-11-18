@@ -224,6 +224,9 @@ where
     const OUTER_RUN_VARS: &[&str] = &[
         "DUHEM_SHARD",
         "DUHEM_RUN_ID",
+        "DUHEM_BRANCH",
+        "DUHEM_PR",
+        "DUHEM_CI_URL",
         "DUHEM_SERVER_URL",
         "DUHEM_SERVER_TOKEN",
         "DUHEM_HUB_URL",
@@ -258,6 +261,9 @@ mod tests {
         let excluded = [
             "DUHEM_SHARD",
             "DUHEM_RUN_ID",
+            "DUHEM_BRANCH",
+            "DUHEM_PR",
+            "DUHEM_CI_URL",
             "DUHEM_SERVER_URL",
             "DUHEM_SERVER_TOKEN",
             "DUHEM_HUB_URL",

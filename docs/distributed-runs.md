@@ -88,6 +88,42 @@ that passes `CI_NODE_INDEX` directly to its one-based `--shard` flag.
 Use a new shared identity for each logical invocation; if a provider's retry
 keeps these components unchanged, include your attempt identifier explicitly.
 
+## CI context
+
+Every run records optional branch, PR number and CI pipeline URL, including the
+logical parent shared by shards. Explicit `DUHEM_BRANCH`, `DUHEM_PR` and
+`DUHEM_CI_URL` overrides win independently, followed by GitHub Actions, GitLab CI
+and Buildkite variables in that order. Missing values remain absent.
+
+| Provider | Branch | PR number | CI URL |
+| --- | --- | --- | --- |
+| GitHub Actions | `GITHUB_HEAD_REF`, else `GITHUB_REF_NAME` | Number from `GITHUB_REF=refs/pull/<number>/…` | `GITHUB_SERVER_URL` + `GITHUB_REPOSITORY` + `/actions/runs/` + `GITHUB_RUN_ID` |
+| GitLab CI | `CI_MERGE_REQUEST_SOURCE_BRANCH_NAME`, else `CI_COMMIT_REF_NAME` | `CI_MERGE_REQUEST_IID` | `CI_PIPELINE_URL` |
+| Buildkite | `BUILDKITE_BRANCH` | `BUILDKITE_PULL_REQUEST` (`false` means absent) | `BUILDKITE_BUILD_URL` |
+
+Target repository resolution also recognizes `CI_PROJECT_URL` and `BUILDKITE_REPO`
+after GitHub's repository context; declared `project:` and `DUHEM_TARGET_REPO`
+still take precedence. Repository coordinates use `host/owner/repo` form.
+The override variables are removed from inherited child-process environments,
+like outer shard and server settings. Explicit child `env:` entries remain
+available; nested Duhem invocations inherit their recorded parent's scope.
+
+The dashboard shows branch, PR and a CI link in run headers and list rows.
+List filter inputs are bookmarked in the URL. Both `GET /api/runs` and
+`GET /api/runs.json` accept exact, case-sensitive `repo`, `branch` and `pr`
+parameters, combined with AND. `repo` matches `target_repo`. Filters select
+top-level runs and retain their full descendant trees, even when a child has
+different or absent metadata. For example:
+
+```text
+/api/runs?repo=github.com%2Facme%2Fapp&branch=feature%2Flogin&pr=42
+```
+
+Responses expose optional `target_repo`, `branch`, `pr` and `ci_url` on each run;
+older runs have none of the new CI fields. See the
+[worked ingest definition](../verifications/bundle-ingest-example/duhem.yml)
+for an override and a filtered lookup against a real server.
+
 ## CI recipes
 
 CI's own shard job statuses are the merge gate: a failed or missing shard fails

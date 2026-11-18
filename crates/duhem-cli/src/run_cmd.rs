@@ -467,11 +467,29 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    if let Some(plan) = &shard_plan
-        && let Err(error) = plan.ensure_parent(store.clone(), &target).await
-    {
-        eprintln!("shard parent: {error}");
-        return ExitCode::FAILURE;
+    if let Some(plan) = &shard_plan {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let parent_scope = invocation_parent
+            .as_ref()
+            .map(|parent| parent.scope.clone())
+            .unwrap_or_else(|| {
+                duhem_runtime::resolve_scope(
+                    leaves
+                        .first()
+                        .and_then(|leaf| leaf.definition.project.as_ref())
+                        .filter(|_| !is_manifest)
+                        .or(manifest_project.as_ref()),
+                    &cwd,
+                    target.parent(),
+                )
+            });
+        if let Err(error) = plan
+            .ensure_parent(store.clone(), &target, parent_scope)
+            .await
+        {
+            eprintln!("shard parent: {error}");
+            return ExitCode::FAILURE;
+        }
     }
     let mut suite_native = Vec::new();
     let mut suite_parent_id: Option<String> = None;

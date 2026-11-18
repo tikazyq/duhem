@@ -128,6 +128,16 @@ impl EvidenceReader {
     /// `GET /api/runs`: a recorded-lineage tree. Top-level rows have
     /// no parent; every descendant is nested under its recorded parent.
     pub async fn list(&self) -> Result<Vec<RunsListEntry>, ReaderError> {
+        self.list_filtered(None, None, None).await
+    }
+
+    /// Match root scope exactly, retaining the complete tree below each match.
+    pub async fn list_filtered(
+        &self,
+        repo: Option<&str>,
+        branch: Option<&str>,
+        pr: Option<&str>,
+    ) -> Result<Vec<RunsListEntry>, ReaderError> {
         let records = self.store.list_runs().await?;
         let by_id: BTreeMap<&str, &RunRecord> = records
             .iter()
@@ -145,6 +155,9 @@ impl EvidenceReader {
         let mut entries: Vec<RunsListEntry> = records
             .iter()
             .filter(|record| record.lineage.parent_run_id.is_none())
+            .filter(|record| repo.is_none_or(|v| record.scope.target_repo.as_deref() == Some(v)))
+            .filter(|record| branch.is_none_or(|v| record.scope.branch.as_deref() == Some(v)))
+            .filter(|record| pr.is_none_or(|v| record.scope.pr.as_deref() == Some(v)))
             .map(|record| lineage_entry(record, &by_id, &child_ids))
             .collect();
         for entry in &mut entries {
@@ -577,6 +590,10 @@ fn lineage_entry(
     RunsListEntry {
         run_id: record.run_id.clone(),
         verification: verification_name(&record.verification),
+        target_repo: record.scope.target_repo.clone(),
+        branch: record.scope.branch.clone(),
+        pr: record.scope.pr.clone(),
+        ci_url: record.scope.ci_url.clone(),
         started_at: Some(record.started_at),
         duration_ms: record.duration_ms,
         verdict: record.verdict,
@@ -810,6 +827,10 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         body_verdict,
         run_id: run.record.run_id.clone(),
         verification: run.verification(),
+        target_repo: run.record.scope.target_repo.clone(),
+        branch: run.record.scope.branch.clone(),
+        pr: run.record.scope.pr.clone(),
+        ci_url: run.record.scope.ci_url.clone(),
         started_at: run.started_at(),
         inputs,
         verdict: run_verdict,

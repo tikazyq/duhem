@@ -57,6 +57,23 @@ function leaf(
 }
 
 describe("RunsList", () => {
+  it("filters roots by URL CI context while preserving descendants", async () => {
+    stubRuns([
+      { ...leaf("root", null), kind: "run-set", target_repo: "github.com/acme/app", branch: "feature/ci", pr: "42", children: [
+        { ...leaf("matching-child", "pass"), branch: "different", pr: "99", ci_url: "https://ci.example/123" },
+      ] },
+      { ...leaf("other-root", "pass"), target_repo: "github.com/acme/app", branch: "main", pr: "42" },
+    ]);
+    renderRuns(<RunsList />, "/runs?repo=github.com%2Facme%2Fapp&branch=feature%2Fci&pr=42");
+    expect(await screen.findByText("matching-child")).toBeTruthy();
+    expect(screen.queryByText("other-root")).toBeNull();
+    expect(screen.getByRole("link", { name: "CI ↗" }).getAttribute("href")).toBe("https://ci.example/123");
+    expect(screen.getByText("PR #99")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "branch" }), { target: { value: "missing" } });
+    expect(await screen.findByText("No runs match the filters")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: /Clear/ })[0]);
+    expect(await screen.findByText("other-root")).toBeTruthy();
+  });
   it("renders the empty state", async () => {
     stubRuns([]);
     renderRuns(<RunsList />);
