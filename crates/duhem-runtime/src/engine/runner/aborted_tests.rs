@@ -10,12 +10,11 @@ teardown: [{uses: fake/ok}]
 flows:
   resource:
     steps:
-      - uses: fake/ok
-      - uses: fake/ok
-        with: {value: $steps.missing.outputs.value}
+      - id: make
+        uses: fake/ok
     cleanup:
       - uses: fake/ok
-        with: {value: $steps.cleanup_missing.outputs.value}
+        with: {value: $steps.make.outputs.value}
       - uses: fake/ok
         if: always
 criteria:
@@ -30,7 +29,13 @@ criteria:
       - id: checked
         assertions: ["true"]
       - id: abort
-        steps: [{call: resource}]
+        steps:
+          - call: resource
+          - id: missing
+            uses: fake/ok
+            if: failure
+          - uses: fake/ok
+            with: {value: $steps.missing.outputs.value}
         teardown: [{uses: fake/ok}]
         assertions: ["true"]
 "#,
@@ -67,8 +72,11 @@ criteria:
             ))
     );
     assert!(events.iter().any(|event| matches!(&event.payload,
-        EventPayload::SetupStepFinished { detail: Some(detail), .. }
-        if detail.contains("$steps.cleanup_missing.outputs.value"))));
+        EventPayload::SetupStepFinished {
+            phase: duhem_evidence::StepPhase::Teardown,
+            outcome: duhem_evidence::StepOutcome::Error,
+            detail: Some(detail), ..
+        } if detail.contains("outputs.value") && detail.contains("make"))));
     let trace = Trace::from_events(events).unwrap();
     duhem_evidence::replay_aborted(&trace).unwrap();
     assert_eq!(
