@@ -813,7 +813,7 @@ criteria:
                 - $inputs.cleanup_dir
               cwd: $inputs.repo_dir
         assertions:
-          - $steps.run_cleanup_example.outputs.exit_code != 0
+          - $steps.run_cleanup_example.outputs.exit_code == 1
           - matches:
               value: $steps.run_cleanup_example.outputs.stderr
               pattern: 'unresolved reference.*gated_source'

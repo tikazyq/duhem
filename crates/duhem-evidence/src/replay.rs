@@ -30,6 +30,8 @@ pub enum ReplayError {
     MissingRunStarted,
     #[error("trace missing run_finished event")]
     MissingRunFinished,
+    #[error("trace missing run_aborted event")]
+    MissingRunAborted,
     #[error("{0}")]
     Divergence(#[from] ReplayDivergence),
     #[error("event ordering violated: {0}")]
@@ -73,7 +75,44 @@ pub struct ReplayedRun {
 
 /// Re-aggregate the recorded outcomes and assert reproducibility.
 pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
+    replay_inner(trace, false)?.ok_or(ReplayError::MissingRunFinished)
+}
+
+/// Verify every completed check and criterion in an aborted run. Unfinished
+/// scopes are permitted; an abort never produces a run verdict.
+pub fn replay_aborted(trace: &Trace) -> Result<(), ReplayError> {
+    replay_inner(trace, true).map(|_| ())
+}
+
+fn replay_inner(trace: &Trace, aborted: bool) -> Result<Option<ReplayedRun>, ReplayError> {
     let events = trace.events();
+    let terminals: Vec<_> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| {
+            matches!(
+                event.payload,
+                EventPayload::RunFinished { .. } | EventPayload::RunAborted { .. }
+            )
+        })
+        .collect();
+    if terminals.len() > 1
+        || terminals
+            .first()
+            .is_some_and(|(index, _)| *index + 1 != events.len())
+    {
+        return Err(ReplayError::OutOfOrder(
+            "terminal event must occur exactly once at the end".into(),
+        ));
+    }
+    if aborted
+        && !matches!(
+            events.last().map(|event| &event.payload),
+            Some(EventPayload::RunAborted { .. })
+        )
+    {
+        return Err(ReplayError::MissingRunAborted);
+    }
 
     // Per-check assertion outcomes (in trace order — first-cause-wins
     // for `Inconclusive` matches the judge's fold), recorded
@@ -146,6 +185,11 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 if *diagnostic {
                     continue;
                 }
+                if recorded_checks.contains_key(check_id) {
+                    return Err(ReplayError::OutOfOrder(format!(
+                        "assertion after check_finished for {check_id}"
+                    )));
+                }
                 assertions_by_check
                     .entry(check_id.clone())
                     .or_default()
@@ -167,7 +211,19 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 {
                     check_to_criterion.insert(check_id.clone(), criterion_id.clone());
                 }
-                recorded_checks.insert(check_id.clone(), *verdict);
+                if check_to_criterion
+                    .get(check_id)
+                    .is_some_and(|owner| recorded_criteria.contains_key(owner))
+                {
+                    return Err(ReplayError::OutOfOrder(format!(
+                        "check_finished after criterion_finished for {check_id}"
+                    )));
+                }
+                if recorded_checks.insert(check_id.clone(), *verdict).is_some() {
+                    return Err(ReplayError::OutOfOrder(format!(
+                        "more than one check_finished for {check_id}"
+                    )));
+                }
                 if !assertions_by_check.contains_key(check_id)
                     && let Some(state) = process_setup.failed_for(criterion_id.as_deref(), check_id)
                 {
@@ -186,10 +242,15 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 criterion_id,
                 verdict,
             } => {
-                if !recorded_criteria.contains_key(criterion_id) {
-                    criterion_order.push(criterion_id.clone());
+                if recorded_criteria
+                    .insert(criterion_id.clone(), *verdict)
+                    .is_some()
+                {
+                    return Err(ReplayError::OutOfOrder(format!(
+                        "more than one criterion_finished for {criterion_id}"
+                    )));
                 }
-                recorded_criteria.insert(criterion_id.clone(), *verdict);
+                criterion_order.push(criterion_id.clone());
             }
             EventPayload::RunFinished {
                 verdict,
@@ -262,7 +323,9 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     if !saw_run_started {
         return Err(ReplayError::MissingRunStarted);
     }
-    let recorded_run = recorded_run.ok_or(ReplayError::MissingRunFinished)?;
+    if !aborted && recorded_run.is_none() {
+        return Err(ReplayError::MissingRunFinished);
+    }
 
     // Trace completeness: every check whose assertions were observed
     // must have a `check_finished`, and every criterion that owns an
@@ -270,14 +333,14 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     // check, an incomplete trace could replay as "matching" simply
     // because the orphan assertions never got folded in.
     for check_id in assertions_by_check.keys() {
-        if !recorded_checks.contains_key(check_id) {
+        if !aborted && !recorded_checks.contains_key(check_id) {
             return Err(ReplayError::OutOfOrder(format!(
                 "assertions recorded for check {check_id} but no check_finished"
             )));
         }
     }
     for criterion_id in check_to_criterion.values() {
-        if !recorded_criteria.contains_key(criterion_id) {
+        if !aborted && !recorded_criteria.contains_key(criterion_id) {
             return Err(ReplayError::OutOfOrder(format!(
                 "checks observed under criterion {criterion_id} but no criterion_finished"
             )));
@@ -322,6 +385,20 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     let mut recomputed_criteria: Vec<CriterionVerdict> = Vec::new();
     for criterion_id in &criterion_order {
         let recorded = recorded_criteria[criterion_id];
+        // A completed criterion cannot hide unfinished checks, even though
+        // other scopes in an aborted trace may be incomplete.
+        if assertions_by_check
+            .keys()
+            .chain(check_to_criterion.keys())
+            .any(|check_id| {
+                check_to_criterion.get(check_id) == Some(criterion_id)
+                    && !recorded_checks.contains_key(check_id)
+            })
+        {
+            return Err(ReplayError::OutOfOrder(format!(
+                "unfinished check under finished criterion {criterion_id}"
+            )));
+        }
         let checks = checks_by_criterion.remove(criterion_id).unwrap_or_default();
         let (state, _) = duhem_judge::apply_inconclusive_policy(
             criterion_id,
@@ -342,6 +419,11 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
             checks,
         });
     }
+
+    if aborted {
+        return Ok(None);
+    }
+    let recorded_run = recorded_run.ok_or(ReplayError::MissingRunFinished)?;
 
     // Recompute the run verdict.
     let mut run = aggregate_run(recomputed_criteria);
@@ -373,5 +455,5 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
         .into());
     }
 
-    Ok(ReplayedRun { run })
+    Ok(Some(ReplayedRun { run }))
 }

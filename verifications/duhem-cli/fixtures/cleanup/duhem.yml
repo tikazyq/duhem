@@ -4,7 +4,9 @@
 # an output on a gated step. Its `if: always` step removes per-attempt
 # state, then leaf `teardown:` removes the setup directory. The inner run
 # remains an engine error; AC-15 in the parent duhem-cli self-verification
-# suite mechanically proves both cleanup layers ran.
+# suite mechanically proves both cleanup layers ran. The run is sealed with
+# run_aborted {signal: engine_error, error: <masked original error>} after
+# teardown; its completed judgments can replay, but it has no run verdict (#686).
 
 verification: cleanup that actually runs
 spec_ref: https://github.com/onsager-ai/duhem/issues/409

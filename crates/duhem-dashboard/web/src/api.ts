@@ -139,6 +139,7 @@ export interface RunDetail {
   inputs: Record<string, unknown>;
   verdict: Verdict | null;
   status: RunStatus;
+  error?: string;
   setup_aborted: boolean;
   /** `true` when the run recorded its VD source snapshot (#302); the
    *  client then fetches it from `definitionUrl`. */

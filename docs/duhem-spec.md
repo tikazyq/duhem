@@ -1842,6 +1842,16 @@ The shipped workspace is named in parentheses below (`crates/*`). Components wit
 > verdict-less `run_finished`; it lives in the store's `events` rows
 > and in export bundles.
 
+Engine errors seal started leaf runs with exactly one final `run_aborted`
+event after cleanup, carrying `signal: engine_error` and optional, secret-masked
+`error` text. Operator termination keeps its signal and omits `error`; legacy
+abort events remain readable. The CLI preserves the original engine error and
+exit code 1, and no run verdict is recorded. Strict replay requires a judged
+`run_finished`; aborted replay verifies every completed check and criterion
+judgment while allowing unfinished scopes, without aggregating a run verdict.
+Server ingest applies aborted replay before storing these runs, and the dashboard
+shows their aborted status and recorded error.
+
 - Append-only run store: the wire-format event stream, derived
   verdict/criteria/check projections, and content-addressed binary
   blobs (screenshots, videos, HAR), one database per working copy

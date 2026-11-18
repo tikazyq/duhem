@@ -515,10 +515,13 @@ pub enum EventPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         verdict: Option<VerdictState>,
     },
-    /// The runtime observed an operator termination signal and sealed
-    /// the run before exiting.
+    /// The runtime sealed a run after operator termination or an engine error.
     RunAborted {
+        /// Operator signal (e.g. SIGTERM), or `engine_error` for execution errors.
         signal: String,
+        /// Engine error text, masked before persistence. Legacy operator aborts omit it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
 }
 
@@ -774,6 +777,26 @@ mod tests {
             }
         );
         assert_eq!(serde_json::to_string(&event).unwrap(), old);
+    }
+
+    #[test]
+    fn legacy_abort_omits_error_and_engine_abort_round_trips() {
+        let old = r#"{"kind":"run_aborted","signal":"SIGTERM"}"#;
+        let payload: EventPayload = serde_json::from_str(old).unwrap();
+        assert!(matches!(
+            &payload,
+            EventPayload::RunAborted { error: None, .. }
+        ));
+        assert_eq!(serde_json::to_string(&payload).unwrap(), old);
+        let payload = EventPayload::RunAborted {
+            signal: "engine_error".into(),
+            error: Some("unresolved reference".into()),
+        };
+        assert_eq!(
+            serde_json::from_str::<EventPayload>(&serde_json::to_string(&payload).unwrap())
+                .unwrap(),
+            payload
+        );
     }
 
     #[test]

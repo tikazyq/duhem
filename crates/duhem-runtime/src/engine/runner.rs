@@ -673,9 +673,17 @@ impl Engine {
             Ok(result) => {
                 // Error paths may leave a partially entered scope. They still
                 // own their process groups even when evidence cannot be sealed.
-                if result.is_err() {
+                if let Err(error) = &result {
                     self.drain_interrupted_processes(&mut writer, &mut run_state)
                         .await;
+                    // Seal only after all cleanup evidence, without manufacturing
+                    // a judgment or replacing the original execution error.
+                    writer
+                        .append(EventPayload::RunAborted {
+                            signal: "engine_error".into(),
+                            error: Some(error.to_string()),
+                        })
+                        .await?;
                 }
                 let result = result.map(|mut outcome| {
                     // Use the writer's live registry: it includes
@@ -693,6 +701,7 @@ impl Engine {
                 writer
                     .append(EventPayload::RunAborted {
                         signal: signal.to_string(),
+                        error: None,
                     })
                     .await?;
                 writer.finish().await?;
@@ -907,6 +916,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     include!("runner/cleanup_tests.rs");
+    include!("runner/aborted_tests.rs");
     include!("runner/flow_cleanup_tests.rs");
     use super::*;
     use crate::engine::registry::{ConcreteAction, Dispatch};
@@ -990,7 +1000,7 @@ criteria:
                 .unwrap();
             assert!(matches!(
                 events.last().map(|event| &event.payload),
-                Some(EventPayload::RunAborted { signal }) if signal == "SIGTERM"
+                Some(EventPayload::RunAborted { signal, error: None }) if signal == "SIGTERM"
             ));
             return;
         }

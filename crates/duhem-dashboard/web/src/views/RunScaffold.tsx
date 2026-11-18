@@ -784,6 +784,11 @@ export function VerdictBand({
             )}
           </p>
         )}
+        {run.error && (
+          <p data-testid="run-error" className="mt-1.5 whitespace-pre-wrap text-sm text-foreground [overflow-wrap:anywhere]">
+            {run.error}
+          </p>
+        )}
         {!collapsed && first && (
           <Link
             to={checkHref(first.runId, first.criterionId, first.checkId)}

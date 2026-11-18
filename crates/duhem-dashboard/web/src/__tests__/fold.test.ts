@@ -47,6 +47,24 @@ describe("foldRun", () => {
     expect(done.verdict).toBeNull();
   });
 
+  it("retains partial judgments and the engine error on abort", () => {
+    const done = foldRun("r1", [
+      ...trace.slice(0, 5),
+      { seq: 5, ts: "2026-06-10T10:00:05.000Z", kind: "run_aborted", signal: "engine_error", error: "unresolved reference: [redacted:token]" },
+    ]);
+    expect(done.status).toBe("aborted");
+    expect(done.verdict).toBeNull();
+    expect(done.error).toBe("unresolved reference: [redacted:token]");
+    expect(done.criteria[0].verdict).toBeNull();
+    expect(done.criteria[0].checks[0].verdict).toBe("pass");
+    const legacy = foldRun("r1", [
+      trace[0],
+      { seq: 1, ts: "2026-06-10T10:00:05.000Z", kind: "run_aborted", signal: "SIGTERM" },
+    ]);
+    expect(legacy.status).toBe("aborted");
+    expect(legacy.error).toBeUndefined();
+  });
+
   it("flags an aborted setup", () => {
     const aborted = foldRun("r1", [
       trace[0],

@@ -647,7 +647,8 @@ mod tests {
         writer.append(EventPayload::RunHeartbeat).await.unwrap();
         writer
             .append(EventPayload::RunAborted {
-                signal: secret.to_string(),
+                signal: "engine_error".into(),
+                error: Some(format!("execution failed: {secret}")),
             })
             .await
             .unwrap();
@@ -666,8 +667,8 @@ mod tests {
             assert!(events.iter().any(|event| {
                 matches!(
                     &event.payload,
-                    EventPayload::RunAborted { signal }
-                        if signal == "[redacted:abort_signal]"
+                    EventPayload::RunAborted { signal, error: Some(error) }
+                        if signal == "engine_error" && error == "execution failed: [redacted:abort_signal]"
                 )
             }));
             assert!(events.iter().any(|event| {
