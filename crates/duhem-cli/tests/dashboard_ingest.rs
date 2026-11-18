@@ -244,7 +244,8 @@ criteria:
               env: {{DUHEM_HUB_URL: "{}"}}
         assertions:
           - $steps.nested.outputs.exit_code == 0
-          - $steps.nested.outputs.stderr == ''
+          # The dashboard advertises a live link beside the source store.
+          - matches: {{value: $steps.nested.outputs.stderr, pattern: '\A(?:live: [^\r\n]*\r?\n)*\z'}}
 "#, hub.url())).unwrap();
     std::fs::write(
         &manifest,
