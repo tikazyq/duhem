@@ -4,7 +4,7 @@ use std::process::{Command, Output};
 use std::sync::Arc;
 
 use duhem_dashboard::{EvidenceReader, ingest::ingest_router, router};
-use duhem_evidence::{RunBundle, SqliteStore, Store, VerdictState};
+use duhem_evidence::{EventPayload, RunBundle, RunStatus, SqliteStore, Store, VerdictState};
 
 async fn server(
     db: &Path,
@@ -242,12 +242,12 @@ async fn auto_send_continues_after_a_rejected_nested_run() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn auto_send_skips_an_unfinished_nested_engine_error() {
+async fn auto_send_uploads_a_nested_engine_abort() {
     let tmp = tempfile::tempdir().unwrap();
     let child = tmp.path().join("child.yml");
-    std::fs::write(&child, "verification: unfinished\ncriteria:\n  - id: A\n    description: engine error\n    checks:\n      - id: a\n        steps:\n          - id: missing\n            uses: cli/invoke\n            if: failure\n            with: {command: ['true']}\n          - id: error\n            uses: cli/invoke\n            with: {command: [sh, -c, $steps.missing.outputs.stdout]}\n        assertions: ['true']\n").unwrap();
+    std::fs::write(&child, "verification: aborted child\ncriteria:\n  - id: A\n    description: engine error\n    checks:\n      - id: a\n        steps:\n          - id: missing\n            uses: cli/invoke\n            if: failure\n            with: {command: ['true']}\n          - id: error\n            uses: cli/invoke\n            with: {command: [sh, -c, $steps.missing.outputs.stdout]}\n        assertions: ['true']\n").unwrap();
     let path = tmp.path().join("parent.yml");
-    std::fs::write(&path, format!("verification: parent\ncriteria:\n  - id: A\n    description: nested engine error is expected\n    checks:\n      - id: a\n        steps:\n          - id: nested\n            uses: cli/invoke\n            with:\n              command: [{:?}, run, {:?}, --no-live]\n        assertions: ['$steps.nested.outputs.exit_code != 0']\n", env!("CARGO_BIN_EXE_duhem"), child)).unwrap();
+    std::fs::write(&path, format!("verification: parent\ncriteria:\n  - id: A\n    description: nested engine error is expected\n    checks:\n      - id: a\n        steps:\n          - id: nested\n            uses: cli/invoke\n            with:\n              command: [{:?}, run, {:?}, --no-live]\n        assertions: ['$steps.nested.outputs.exit_code == 1']\n", env!("CARGO_BIN_EXE_duhem"), child)).unwrap();
     let db = tmp.path().join("local.db");
     let (url, remote, task) = server(&tmp.path().join("remote.db"), true).await;
     let output = command(&path, &db)
@@ -255,26 +255,24 @@ async fn auto_send_skips_an_unfinished_nested_engine_error() {
         .env("DUHEM_SERVER_TOKEN", "test-token")
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("warning: auto-send: sent 1 of 2 runs; skipped 1 unfinished"),
-        "{stderr}"
-    );
-    assert_eq!(
-        stderr
-            .lines()
-            .filter(|line| line.starts_with("warning: auto-send:"))
-            .count(),
-        1
-    );
-    assert_eq!(remote.list_runs().await.unwrap().len(), 1);
-    let local = SqliteStore::open_read_only(db).await.unwrap();
-    assert_eq!(local.list_runs().await.unwrap().len(), 2);
+    assert_pass(&output);
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["verdict"], "pass");
+    let parent_id = result["run_id"].as_str().unwrap();
+    let runs = remote.list_runs().await.unwrap();
+    assert_eq!(runs.len(), 2);
+    let child = runs
+        .iter()
+        .find(|run| run.lineage.parent_run_id.as_deref() == Some(parent_id))
+        .unwrap();
+    assert_eq!(child.status, RunStatus::Aborted);
+    assert_eq!(child.verdict, None);
+    let events = remote.run_events(&child.run_id).await.unwrap();
+    assert!(matches!(
+        events.last().map(|event| &event.payload),
+        Some(EventPayload::RunAborted { error: Some(error), .. })
+            if error.contains("unresolved reference `$steps.missing.outputs.stdout`")
+    ));
     task.abort();
 }
 
