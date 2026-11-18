@@ -221,6 +221,7 @@ pub struct SuiteRunConfig<'a> {
     pub run_id: String,
     pub scope: RunScope,
     pub lineage: RunLineage,
+    pub shard: Option<duhem_evidence::ShardPlan>,
     pub skip_env_up: bool,
 }
 
@@ -244,6 +245,7 @@ impl SuiteEnvironment {
             run_id,
             scope,
             lineage,
+            shard,
             skip_env_up,
         } = config;
         let run = RunState::new(std::collections::BTreeMap::new());
@@ -261,14 +263,26 @@ impl SuiteEnvironment {
             writer = writer.with_tee(tx);
         }
         writer.start_heartbeats();
-        writer
-            .append(run_started_with_definition_and_lineage(
-                definition_path,
-                std::collections::BTreeMap::new(),
-                None,
-                lineage,
-            ))
-            .await?;
+        let mut started = run_started_with_definition_and_lineage(
+            definition_path,
+            std::collections::BTreeMap::new(),
+            None,
+            lineage,
+        );
+        if let EventPayload::RunStarted {
+            shard: recorded,
+            parent_run_id,
+            origin,
+            ..
+        } = &mut started
+        {
+            if let Some(plan) = &shard {
+                *parent_run_id = Some(plan.parent_run_id.clone());
+                *origin = Some(duhem_evidence::RunOrigin::Shard);
+            }
+            *recorded = shard;
+        }
+        writer.append(started).await?;
         let up = match environment {
             Some(env) => {
                 let mut provision = Box::pin(bring_environment_up(
@@ -696,6 +710,7 @@ mod tests {
                 run_id: "01SUITE".to_string(),
                 scope: RunScope::default(),
                 lineage: RunLineage::default(),
+                shard: None,
                 skip_env_up: false,
             },
             store.clone(),
@@ -754,6 +769,7 @@ mod tests {
                 run_id: "01SUITETEE".to_string(),
                 scope: RunScope::default(),
                 lineage: RunLineage::default(),
+                shard: None,
                 skip_env_up: false,
             },
             std::sync::Arc::new(store),

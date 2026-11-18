@@ -1371,6 +1371,8 @@ GitHub Actions exposes `strategy.job-index` and `strategy.job-total` as workflow
 
 The deterministic partition uses the selected leaves, criteria, and native runs (#649) as units. A criterion is the smallest unit: its checks and `setup:` remain together. Every shard computes the same partition from the manifest digest, selection, and shard count `n`, without coordination. Shards are disjoint and together cover the selection. Each shard runs the enclosing lifecycle its units need, including `provision`, leaf `setup:`/`teardown:`, and cleanups; see §10.3.6.
 
+The local partition interface and CI recipes are documented in [Distributed runs](sharding.md); a runnable manifest lives at `verifications/sharding-example/duhem.yml`.
+
 This reuses the run lineage model: one logical parent run, with child runs and verdict aggregation through `RunSetSummary`. The shared run ID identifies the parent and is permitted for manifest runs when sharding. Each shard records `origin: shard`, its `shard: k/n`, manifest digest, and expected partition so reports show what was planned.
 
 ```yaml

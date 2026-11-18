@@ -117,6 +117,10 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
         .as_deref()
         .map(parse_run_status)
         .transpose()?;
+    let shard: Option<crate::ShardPlan> = row
+        .get::<Option<String>, _>("shard_plan")
+        .map(|json| serde_json::from_str(&json))
+        .transpose()?;
     Ok(RunRecord {
         run_id: row.get("run_id"),
         verification: row.get("verification"),
@@ -128,14 +132,22 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
         finished_at: finished_at.as_deref().map(parse_ts).transpose()?,
         duration_ms: duration_ms.map(|d| d as u64),
         last_heartbeat_at,
-        lineage: RunLineage {
-            parent_run_id: row.get("parent_run_id"),
-            origin: row
-                .get::<Option<String>, _>("origin")
-                .as_deref()
-                .map(parse_run_origin)
-                .transpose()?,
+        lineage: if let Some(plan) = &shard {
+            RunLineage {
+                parent_run_id: Some(plan.parent_run_id.clone()),
+                origin: Some(RunOrigin::Shard),
+            }
+        } else {
+            RunLineage {
+                parent_run_id: row.get("parent_run_id"),
+                origin: row
+                    .get::<Option<String>, _>("origin")
+                    .as_deref()
+                    .map(parse_run_origin)
+                    .transpose()?,
+            }
         },
+        shard,
         scope: RunScope {
             project_id: row.get("project_id"),
             verifier_repo: row.get("verifier_repo"),
@@ -146,7 +158,7 @@ fn row_to_run_record(row: &sqlx::sqlite::SqliteRow) -> Result<RunRecord, StoreEr
     })
 }
 
-const RUN_SELECT: &str = "SELECT r.run_id, r.verification, r.schema_version, r.inputs, \
+const RUN_SELECT: &str = "SELECT (SELECT s.plan FROM run_shards s WHERE s.run_id = r.run_id) AS shard_plan, r.run_id, r.verification, r.schema_version, r.inputs, \
      r.started_at, r.parent_run_id, r.origin, r.project_id, r.verifier_repo, r.verifier_sha, \
      r.target_repo, r.target_sha, v.verdict, t.status AS terminal_status, t.terminal_at, t.duration_ms, \
      COALESCE((SELECT MAX(e.ts) FROM events e WHERE e.run_id = r.run_id \
@@ -166,6 +178,7 @@ fn parse_run_origin(token: &str) -> Result<RunOrigin, StoreError> {
     match token {
         "suite" => Ok(RunOrigin::Suite),
         "invocation" => Ok(RunOrigin::Invocation),
+        "shard" => Ok(RunOrigin::Shard),
         other => Err(StoreError::BadRunOrigin(other.to_string())),
     }
 }
@@ -174,6 +187,7 @@ fn run_origin_token(origin: RunOrigin) -> &'static str {
     match origin {
         RunOrigin::Suite => "suite",
         RunOrigin::Invocation => "invocation",
+        RunOrigin::Shard => "shard",
     }
 }
 
@@ -248,6 +262,24 @@ impl Store for SqliteStore {
         // Same transaction: the projections can never drift from the
         // event stream.
         match &event.payload {
+            EventPayload::RunStarted {
+                shard: Some(plan), ..
+            } => {
+                sqlx::query(
+                    "INSERT INTO run_shards (run_id, parent_run_id, shard_index, shard_total, \
+                     source, manifest_digest, plan_digest, plan) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .bind(run_id)
+                .bind(&plan.parent_run_id)
+                .bind(plan.index)
+                .bind(plan.total)
+                .bind(&plan.source)
+                .bind(&plan.manifest_digest)
+                .bind(&plan.plan_digest)
+                .bind(serde_json::to_string(plan)?)
+                .execute(&mut *tx)
+                .await?;
+            }
             EventPayload::AssertionEvaluated {
                 check_id,
                 assertion_index,

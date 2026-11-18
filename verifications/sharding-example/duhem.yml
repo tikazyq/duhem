@@ -1,0 +1,13 @@
+# Run the same manifest on two machines (or sequentially to inspect it):
+#   duhem run -f verifications/sharding-example/duhem.yml --shard 1/2 --run-id example
+#   duhem run -f verifications/sharding-example/duhem.yml --shard 2/2 --run-id example
+# Criteria remain whole; native commands are independent partition units.
+manifest_version: 1
+native:
+  - id: greeting
+    command: [sh, -c, 'printf "hello from a native shard\n"']
+    expect:
+      exit_code: 0
+      stdout: {matches: 'hello from a native shard'}
+verifications:
+  - path: criteria.yml

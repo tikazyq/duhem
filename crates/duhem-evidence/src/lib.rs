@@ -27,6 +27,8 @@ pub mod replay;
 mod replay_process;
 pub mod secret;
 pub mod session;
+pub mod shard;
+pub use shard::{ShardPlan, ShardUnit, plan_digest};
 pub mod store;
 pub mod writer;
 

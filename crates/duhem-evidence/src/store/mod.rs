@@ -109,6 +109,7 @@ pub struct RunLineage {
 #[derive(Debug, Clone)]
 pub struct RunRecord {
     pub run_id: String,
+    pub shard: Option<crate::ShardPlan>,
     pub verification: String,
     pub schema_version: String,
     pub inputs: BTreeMap<String, serde_json::Value>,

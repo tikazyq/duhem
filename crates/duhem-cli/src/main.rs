@@ -34,6 +34,7 @@ mod resolve_provenance;
 mod run_cmd;
 mod run_lineage;
 mod run_scope;
+mod sharding;
 mod validate_cmd;
 
 use std::path::PathBuf;
@@ -206,11 +207,16 @@ enum Cmd {
         /// migrated if missing.
         #[arg(long = "db", value_name = "PATH")]
         db: Option<PathBuf>,
-        /// Pin the run id instead of minting a fresh ULID. For
-        /// fixtures and tests that need deterministic run URLs;
-        /// single-leaf runs only (a manifest run has several leaves).
+        /// Pin a single-leaf run ID. With --shard / DUHEM_SHARD or CI
+        /// sharding, name the shared logical parent instead; every shard
+        /// execution still gets a fresh ID. Overrides DUHEM_RUN_ID.
         #[arg(long = "run-id", value_name = "ID")]
         run_id: Option<String>,
+        /// Run one balanced shard (one-based k/n). Overrides DUHEM_SHARD
+        /// and GitLab, Buildkite or CircleCI shard detection. With sharding,
+        /// --run-id / DUHEM_RUN_ID names the shared logical parent.
+        #[arg(long, value_name = "k/n")]
+        shard: Option<String>,
         /// Stdout formatting for the post-run summary. Built-in
         /// names: `default` (verdict line), `quiet` (exit code
         /// only), `json` (`RunSummary` v2 for a leaf, or `RunSetSummary`
@@ -431,6 +437,7 @@ fn main() -> ExitCode {
             filter,
             db,
             run_id,
+            shard,
             reporter,
             profile,
             dry_run,
@@ -492,6 +499,7 @@ fn main() -> ExitCode {
                 filter,
                 db,
                 run_id,
+                shard,
                 reporter: resolved_reporter,
                 profile,
                 dry_run,

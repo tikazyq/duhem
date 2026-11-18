@@ -550,6 +550,7 @@ pub fn run_started_with_viewport(
         schema_version: SCHEMA_VERSION.to_string(),
         parent_run_id: lineage.parent_run_id,
         origin: lineage.origin,
+        shard: None,
         definition,
         viewport,
     }

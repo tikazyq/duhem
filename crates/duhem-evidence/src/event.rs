@@ -86,6 +86,7 @@ pub enum RunStatus {
 pub enum RunOrigin {
     Suite,
     Invocation,
+    Shard,
 }
 
 /// Outcome of a single step invocation. Distinct from a verdict —
@@ -233,6 +234,9 @@ pub enum EventPayload {
         /// Why this child exists. Root and pre-lineage runs omit it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         origin: Option<RunOrigin>,
+        /// Complete distributed plan; absent on historical and unsharded runs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shard: Option<crate::ShardPlan>,
         /// Snapshot of the Verification Definition source (raw YAML) as
         /// it was when this run was judged (spec #302). Makes a run
         /// self-describing — the criteria/check descriptions, step ids,
@@ -572,6 +576,17 @@ mod tests {
     }
 
     #[test]
+    fn legacy_run_started_stays_byte_identical_without_sharding() {
+        let old = r#"{"seq":0,"ts":"2026-05-08T12:00:00.000Z","kind":"run_started","verification_path":"v.yml","schema_version":"v1"}"#;
+        let event: Event = serde_json::from_str(old).unwrap();
+        assert!(matches!(
+            &event.payload,
+            EventPayload::RunStarted { shard: None, .. }
+        ));
+        assert_eq!(serde_json::to_string(&event).unwrap(), old);
+    }
+
+    #[test]
     fn run_started_roundtrip() {
         let mut inputs = BTreeMap::new();
         inputs.insert("workspace_name".into(), serde_json::json!("test-ws-018f"));
@@ -587,6 +602,7 @@ mod tests {
                 schema_version: SCHEMA_VERSION.into(),
                 parent_run_id: None,
                 origin: None,
+                shard: None,
                 definition: None,
                 viewport: None,
             },

@@ -1,0 +1,34 @@
+verification: Sharded command verification
+criteria:
+  - id: GREETING
+    description: The command prints the requested greeting and exits successfully.
+    checks:
+      - id: greeting
+        steps:
+          - id: greet
+            uses: cli/invoke
+            with:
+              command: [sh, -c, 'printf "hello\n"']
+        assertions:
+          - $steps.greet.outputs.exit_code == 0
+          - matches: {value: $steps.greet.outputs.stdout, pattern: '^hello\n$'}
+      - id: farewell
+        steps:
+          - id: farewell
+            uses: cli/invoke
+            with:
+              command: [sh, -c, 'printf "goodbye\n"']
+        assertions:
+          - $steps.farewell.outputs.exit_code == 0
+          - matches: {value: $steps.farewell.outputs.stdout, pattern: '^goodbye\n$'}
+  - id: EXIT
+    description: The command exposes its exit status for deterministic judgment.
+    checks:
+      - id: status
+        steps:
+          - id: status
+            uses: cli/invoke
+            with:
+              command: [sh, -c, 'exit 0']
+        assertions:
+          - $steps.status.outputs.exit_code == 0
