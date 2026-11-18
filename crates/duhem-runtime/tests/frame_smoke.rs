@@ -142,10 +142,7 @@ async fn frame_contents_are_distinct_from_page_and_negative_assertions_discrimin
     let fx = fixture().await;
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     navigate(&ctx, &fx.url).await;
     let inner = "{frame: {testid: report-shell-iframe}, role: heading, name: Weekly report}";
     for (locator, expected, satisfied) in [
@@ -200,10 +197,7 @@ async fn unavailable_ambiguous_and_non_frame_targets_never_prove_inner_absence()
     let fx = fixture().await;
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     navigate(&ctx, &fx.url).await;
     for frame in [
         "{testid: absent}",
@@ -229,10 +223,7 @@ async fn waits_for_late_frame_and_document_and_keeps_one_deadline() {
     let fx = fixture().await;
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     navigate(&ctx, &fx.url).await;
     Click
         .invoke(&ctx, &yaml("role: button\nname: Load delayed frame"))

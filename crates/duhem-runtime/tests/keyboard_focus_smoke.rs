@@ -101,10 +101,7 @@ async fn tab_moves_focus_and_focused_distinguishes_visible_controls() {
     let fx = fixture().await;
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     navigate(&ctx, &fx.url).await;
     Focus
         .invoke(&ctx, &yaml(&format!("locator: {OPTIONS}")))
@@ -132,10 +129,7 @@ async fn enter_activates_focused_button_and_locator_press_describes_element() {
     let fx = fixture().await;
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     navigate(&ctx, &fx.url).await;
     assert!(!satisfied(&ctx, "{role: menu}", "visible").await);
     let pressed = Press
@@ -154,10 +148,7 @@ async fn focus_in_frame_is_distinct_from_parent_and_press_target_is_deepest() {
     let fx = fixture().await;
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     navigate(&ctx, &fx.url).await;
     Focus
         .invoke(&ctx, &yaml(&format!("locator: {INNER_FIELD}")))
@@ -187,10 +178,7 @@ async fn press_target_is_body_when_nothing_is_focused() {
     let fx = fixture().await;
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     navigate(&ctx, &fx.url).await;
     let pressed = Press.invoke(&ctx, &yaml("key: Shift")).await.unwrap();
     let target = &pressed.outputs["target"];
@@ -204,10 +192,7 @@ async fn invalid_key_and_ambiguous_or_missing_targets_fail_usefully() {
     let fx = fixture().await;
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     navigate(&ctx, &fx.url).await;
     let error = Press
         .invoke(&ctx, &yaml("key: NotARealKey"))

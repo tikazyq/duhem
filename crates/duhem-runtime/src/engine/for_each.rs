@@ -647,10 +647,11 @@ async fn invoke_and_record(
         }
         _ => run.process_owner.clone(),
     };
+    let mut action_ctx = duhem_actions::ActionCtx::new(page, idx);
+    action_ctx.session = step.session.as_deref();
     let result = crate::engine::registry::invoke_scoped(
         dispatcher,
-        page,
-        idx,
+        &action_ctx,
         resolved_with,
         child_env,
         run,

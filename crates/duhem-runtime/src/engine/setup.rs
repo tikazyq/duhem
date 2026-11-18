@@ -604,7 +604,7 @@ mod tests {
     use super::*;
     use crate::engine::registry::Dispatch;
     use async_trait::async_trait;
-    use duhem_actions::{ActionError, ActionResult, Outcome, Page};
+    use duhem_actions::{ActionCtx, ActionError, ActionResult, Outcome};
     use duhem_evidence::StepOutcome;
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -629,8 +629,7 @@ mod tests {
         }
         async fn invoke(
             &self,
-            _page: Option<&Page>,
-            _step_index: usize,
+            _ctx: &ActionCtx<'_>,
             _with: &serde_yml::Value,
             _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
@@ -651,8 +650,7 @@ mod tests {
         }
         async fn invoke(
             &self,
-            _page: Option<&Page>,
-            _step_index: usize,
+            _ctx: &ActionCtx<'_>,
             _with: &serde_yml::Value,
             _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {

@@ -884,8 +884,7 @@ mod tests {
 
                 async fn invoke(
                     &self,
-                    _page: Option<&Page>,
-                    _step_index: usize,
+                    _ctx: &ActionCtx<'_>,
                     _with: &serde_yml::Value,
                     _child_env: &BTreeMap<String, String>,
                 ) -> Result<ActionResult, ActionError> {
@@ -1065,8 +1064,7 @@ criteria:
         }
         async fn invoke(
             &self,
-            _page: Option<&Page>,
-            _step_index: usize,
+            _ctx: &ActionCtx<'_>,
             _with: &serde_yml::Value,
             _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
@@ -1107,8 +1105,7 @@ criteria:
 
         async fn invoke(
             &self,
-            _page: Option<&Page>,
-            _step_index: usize,
+            _ctx: &ActionCtx<'_>,
             with: &serde_yml::Value,
             _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
@@ -1146,8 +1143,7 @@ criteria:
         }
         async fn invoke(
             &self,
-            _page: Option<&Page>,
-            _step_index: usize,
+            _ctx: &ActionCtx<'_>,
             with: &serde_yml::Value,
             _env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
@@ -2614,8 +2610,7 @@ criteria:
         }
         async fn invoke(
             &self,
-            _page: Option<&Page>,
-            _step_index: usize,
+            _ctx: &ActionCtx<'_>,
             _with: &serde_yml::Value,
             _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
@@ -3827,8 +3822,7 @@ criteria:
         }
         async fn invoke(
             &self,
-            _page: Option<&Page>,
-            _step_index: usize,
+            _ctx: &ActionCtx<'_>,
             with: &serde_yml::Value,
             _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {
@@ -4676,8 +4670,7 @@ criteria:
         }
         async fn invoke(
             &self,
-            _page: Option<&Page>,
-            _step_index: usize,
+            _ctx: &ActionCtx<'_>,
             with: &serde_yml::Value,
             _child_env: &BTreeMap<String, String>,
         ) -> Result<ActionResult, ActionError> {

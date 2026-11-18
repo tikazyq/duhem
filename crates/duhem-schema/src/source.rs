@@ -45,8 +45,14 @@ struct SourceNode {
 /// Stable authored coordinate for a step after flow expansion.
 #[derive(Debug, Clone)]
 pub(crate) enum StepSourceOrigin {
-    AuthoredCheck { step_index: usize },
-    FlowDefinition { name: String, step_index: usize },
+    AuthoredCheck {
+        step_index: usize,
+        groups: Vec<usize>,
+    },
+    FlowDefinition {
+        name: String,
+        step_index: usize,
+    },
 }
 
 /// Exact YAML-node marks keyed by their structural path.
@@ -162,6 +168,29 @@ impl SourceMap {
         }
     }
 
+    /// Authored path of a top-level check step after flow/group lowering.
+    pub(crate) fn check_step_path(
+        &self,
+        ci: usize,
+        hi: usize,
+        index: usize,
+    ) -> Vec<SourcePathSegment> {
+        let mut path = check_path(ci, hi, "steps");
+        match self.expanded_step_origins.get(&(ci, hi, index)) {
+            Some(StepSourceOrigin::AuthoredCheck { step_index, groups }) => {
+                for group in groups {
+                    path.extend([
+                        SourcePathSegment::index(*group),
+                        SourcePathSegment::key("steps"),
+                    ]);
+                }
+                path.push(SourcePathSegment::index(*step_index));
+            }
+            _ => path.push(SourcePathSegment::index(index)),
+        }
+        path
+    }
+
     /// Resolve an authored step value after expansion, including `with:`,
     /// `session:`, and the `uses:` mark for a missing session selector.
     pub(crate) fn step_with_location(
@@ -191,9 +220,10 @@ impl SourceMap {
                 .expanded_step_origins
                 .get(&(criterion_index, check_index, step_index))
             {
-                Some(StepSourceOrigin::AuthoredCheck { step_index }) => {
-                    *identity_path.last_mut()? = SourcePathSegment::index(*step_index);
-                    authored_value_path[steps_index + 1] = SourcePathSegment::index(*step_index);
+                Some(StepSourceOrigin::AuthoredCheck { .. }) => {
+                    identity_path = self.check_step_path(criterion_index, check_index, step_index);
+                    authored_value_path = identity_path.clone();
+                    authored_value_path.extend_from_slice(&value_path[with_index..]);
                     false
                 }
                 Some(StepSourceOrigin::FlowDefinition { name, step_index }) => {

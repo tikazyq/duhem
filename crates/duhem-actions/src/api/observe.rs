@@ -96,7 +96,7 @@
 //!   the matched event → `ActionError`.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -105,7 +105,7 @@ use serde::Deserialize;
 use tokio::time::{sleep, timeout};
 
 use crate::action::{Action, ActionCtx, ActionResult, DEFAULT_TIMEOUT, Observation};
-use crate::browser::NetworkEvent;
+use crate::browser::{NetworkEvent, Page};
 use crate::error::ActionError;
 use crate::with::TimeoutSpec;
 
@@ -136,7 +136,25 @@ pub(crate) struct With {
     /// Max wait for a matching event. Defaults to [`DEFAULT_TIMEOUT`].
     #[serde(default)]
     timeout: Option<TimeoutSpec>,
+    window: Option<Window>,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Window {
+    from_step: String,
+    edge: Edge,
+    duration: duhem_schema::DurationSpec,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Edge {
+    Start,
+    Finish,
+}
+
+const MAX_WINDOW_REQUESTS: usize = 256;
 
 pub struct Observe;
 
@@ -150,12 +168,13 @@ impl Action for Observe {
         use crate::action::{ActionContract, FieldSpec};
         ActionContract {
             uses: "api/observe",
-            summary: "Observe a network request the page made (matched by method + URL pattern).",
+            summary: "Observe the first matching response, or set `window` to collect up to 256 matching requests by start time. `window` takes an earlier `from_step` on the same session, `edge: start | finish`, and a positive `duration`. `complete` reports whether the window elapsed before the wait ended. `truncated` reports overflow, and `count` is the number of returned entries.",
             with: vec![
                 FieldSpec::required("method"),
                 FieldSpec::required("url_pattern"),
                 FieldSpec::optional("after"),
                 FieldSpec::optional("timeout"),
+                FieldSpec::optional("window"),
             ],
             outputs: vec![
                 "method",
@@ -167,9 +186,14 @@ impl Action for Observe {
                 "headers",
                 "request_body",
                 "request_headers",
+                "count",
+                "requests",
+                "window",
+                "complete",
+                "truncated",
             ],
             secret_outputs: vec![],
-            example: "- uses: api/observe\n  with: { method: POST, url_pattern: \"**/api/login\" }",
+            example: "- uses: api/observe\n  with: { method: POST, url_pattern: 're:/api/login$', window: { from_step: submit, edge: start, duration: 1s } }",
         }
     }
 
@@ -188,6 +212,18 @@ impl Action for Observe {
 
         let matcher = UrlMatcher::parse(&with.url_pattern)?;
         let method_filter = with.method.as_deref().map(str::to_ascii_uppercase);
+
+        if let Some(window) = with.window {
+            return collect_window(
+                ctx,
+                page,
+                window,
+                &matcher,
+                method_filter.as_deref(),
+                timeout_dur,
+            )
+            .await;
+        }
 
         // Poll the sidecar's per-page recorder until a matching event
         // appears or `timeout:` elapses. `cursor` advances past events
@@ -232,6 +268,102 @@ impl Action for Observe {
         result.observations.extend(matched.observations);
         Ok(result)
     }
+}
+
+async fn collect_window(
+    ctx: &ActionCtx<'_>,
+    page: &Page,
+    window: Window,
+    matcher: &UrlMatcher,
+    method: Option<&str>,
+    timeout: Duration,
+) -> Result<ActionResult, ActionError> {
+    let invalid = |message: String| ActionError::InvalidWith {
+        action: "api/observe",
+        source: serde_yml::Error::custom(message),
+    };
+    let timing = ctx
+        .step_timings
+        .iter()
+        .rev()
+        .find(|timing| timing.step_id.as_deref() == Some(window.from_step.as_str()))
+        .ok_or_else(|| {
+            invalid(format!(
+                "no browser timing for window.from_step `{}`",
+                window.from_step
+            ))
+        })?;
+    if timing.session.as_deref() != ctx.session {
+        return Err(invalid(format!(
+            "window.from_step `{}` ran on a different browser session",
+            window.from_step
+        )));
+    }
+    if window.duration.0.is_zero() {
+        return Err(invalid("window.duration must be positive".into()));
+    }
+    let start_ms = match window.edge {
+        Edge::Start => timing.started_ms,
+        Edge::Finish => timing.finished_ms,
+    };
+    let end_ms = start_ms + window.duration.0.as_secs_f64() * 1000.0;
+    let began = Instant::now();
+    let now_ms = loop {
+        let now_ms = page.session_time_ms().await.map_err(window_error)?;
+        let budget = timeout.saturating_sub(began.elapsed());
+        if now_ms >= end_ms || budget.is_zero() {
+            break now_ms;
+        }
+        let remaining_secs = (end_ms - now_ms) / 1000.0;
+        sleep(if remaining_secs >= budget.as_secs_f64() {
+            budget
+        } else {
+            Duration::from_secs_f64(remaining_secs)
+        })
+        .await;
+    };
+    let complete = now_ms >= end_ms;
+    let until_ms = end_ms.min(now_ms);
+    let mut requests = Vec::new();
+    let mut cursor = None;
+    let truncated = 'scan: loop {
+        let batch = page
+            .request_window_batch(start_ms, until_ms, cursor)
+            .await
+            .map_err(window_error)?;
+        for request in batch.requests {
+            if method.is_none_or(|method| request.method == method) && matcher.matches(&request.url)
+            {
+                if requests.len() == MAX_WINDOW_REQUESTS {
+                    break 'scan true;
+                }
+                requests.push(request);
+            }
+        }
+        cursor = batch.cursor;
+        if cursor.is_none() {
+            break false;
+        }
+    };
+    Ok(ActionResult::ok()
+        .with_output("count", serde_json::json!(requests.len()))
+        .with_output("requests", serde_json::json!(requests))
+        .with_output(
+            "window",
+            serde_json::json!({
+                "from_step": window.from_step,
+                "edge": window.edge,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "observed_until_ms": until_ms,
+            }),
+        )
+        .with_output("complete", serde_json::json!(complete))
+        .with_output("truncated", serde_json::json!(truncated)))
+}
+
+fn window_error(error: crate::browser::PwError) -> ActionError {
+    ActionError::Playwright(format!("api/observe window: {error}"))
 }
 
 /// Result of a successful `(url, method)` filter match. The outputs

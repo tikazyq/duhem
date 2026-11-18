@@ -113,10 +113,7 @@ async fn worked_vd_applies_emulation_then_sibling_check_sees_defaults() {
 async fn reads_back_effective_settings_on_blank_page_and_next_context_is_default() {
     let browser = RunBrowser::launch(false).await.unwrap();
     let first = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&first.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&first.page), 0);
     // No navigation yet: the page is still about:blank.
     let dark = emulate(
         &ctx,
@@ -163,10 +160,7 @@ async fn reads_back_effective_settings_on_blank_page_and_next_context_is_default
 async fn invalid_emulation_fails_usefully() {
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     for bad in [
         "{}",
         "viewport: { width: 0, height: 10 }",

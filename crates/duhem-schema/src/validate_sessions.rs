@@ -152,7 +152,7 @@ fn validate_step(
     let ui = step
         .uses
         .as_deref()
-        .is_some_and(|uses| uses.starts_with("ui/"));
+        .is_some_and(|uses| uses.starts_with("ui/") || uses == "api/observe");
     path.push(S::key(if step.session.is_some() {
         "session"
     } else {
@@ -186,7 +186,7 @@ fn validate_step(
         let message = if crate::expr::is_expression(name) {
             Some("step-level `session:` is a bare context name, never an expression; declare acquired state in check `sessions:`".to_string())
         } else if !ui && step.call.is_none() {
-            Some("`session:` is only valid on browser-driving `ui/*` steps".to_string())
+            Some("`session:` is only valid on browser-driving steps".to_string())
         } else if !check
             .and_then(|check| check.sessions.as_ref())
             .is_some_and(|sessions| sessions.contains_key(name))

@@ -25,7 +25,6 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use duhem_actions::Page;
 use duhem_actions::{
     Action, ActionCtx, ActionError, ActionResult, AssertElement, AssertUrl, Back, Call,
     CaptureSession, Click, DbObserve, Emulate, Extract, Focus, Forward, Invoke, Navigate, Observe,
@@ -79,8 +78,7 @@ pub(crate) trait Dispatch: Send + Sync {
 
     async fn invoke(
         &self,
-        page: Option<&Page>,
-        step_index: usize,
+        ctx: &ActionCtx<'_>,
         with: &serde_yml::Value,
         child_env: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError>;
@@ -91,8 +89,7 @@ pub(crate) trait Dispatch: Send + Sync {
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn invoke_scoped(
     dispatcher: &dyn Dispatch,
-    page: Option<&Page>,
-    index: usize,
+    ctx: &ActionCtx<'_>,
     with: &serde_yml::Value,
     child_env: &BTreeMap<String, String>,
     run: &super::RunState,
@@ -106,7 +103,7 @@ pub(crate) async fn invoke_scoped(
             .invoke(dispatcher.uses(), with, owner, child_env, writer)
             .await
     } else {
-        dispatcher.invoke(page, index, with, child_env).await
+        dispatcher.invoke(ctx, with, child_env).await
     }
 }
 
@@ -122,8 +119,7 @@ impl Dispatch for OwnedProcess {
     }
     async fn invoke(
         &self,
-        _: Option<&Page>,
-        _: usize,
+        _: &ActionCtx<'_>,
         _: &serde_yml::Value,
         _: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError> {
@@ -177,20 +173,18 @@ impl Dispatch for ConcreteAction {
 
     async fn invoke(
         &self,
-        page: Option<&Page>,
-        step_index: usize,
+        ctx: &ActionCtx<'_>,
         with: &serde_yml::Value,
         child_env: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError> {
         // A page-requiring action without a page is a dispatch-layer
         // failure (the engine should have refused the check upstream).
-        if self.action.requires_page() && page.is_none() {
+        if self.action.requires_page() && ctx.page.is_none() {
             return Err(ActionError::Playwright(format!(
                 "action `{}` requires a browser page but none was provisioned",
                 self.uses
             )));
         }
-        let ctx = ActionCtx { page, step_index };
         // Only `cli/invoke` needs the runtime-owned env layered in, so
         // only it pays for the clone; every other action (the hot
         // UI/API path) invokes against the original `with` by
@@ -198,9 +192,9 @@ impl Dispatch for ConcreteAction {
         if self.uses == "cli/invoke" {
             let mut invocation_with = with.clone();
             inject_child_env(&mut invocation_with, child_env);
-            self.action.invoke(&ctx, &invocation_with).await
+            self.action.invoke(ctx, &invocation_with).await
         } else {
-            self.action.invoke(&ctx, with).await
+            self.action.invoke(ctx, with).await
         }
     }
 }

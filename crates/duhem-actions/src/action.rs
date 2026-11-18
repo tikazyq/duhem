@@ -30,10 +30,16 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Per-check execution context handed to every `Action::invoke`.
 ///
-/// A new `ActionCtx` is created per check (one Playwright `Page` per
-/// check; see `browser::CheckBrowser`). The runtime spec extends
-/// this with the expression evaluator and evidence sink — both are
-/// out of scope here so we keep the struct narrow.
+/// Boundaries of an executed step on its selected session's clock.
+#[derive(Clone, Debug)]
+pub struct StepTiming {
+    pub step_id: Option<String>,
+    pub session: Option<String>,
+    pub started_ms: f64,
+    pub finished_ms: f64,
+}
+
+/// Read-only runtime context for one action invocation.
 pub struct ActionCtx<'a> {
     /// Browser page bound to this check, or `None` for a page-free
     /// step. The engine attaches a page only when the check contains a
@@ -43,9 +49,22 @@ pub struct ActionCtx<'a> {
     /// Zero-based index of the currently-executing step within its
     /// check. Carried for evidence threading downstream.
     pub step_index: usize,
+    /// Selected named session, or `None` for the default session.
+    pub session: Option<&'a str>,
+    /// Previously executed steps in scope, on their respective session clocks.
+    pub step_timings: &'a [StepTiming],
 }
 
 impl<'a> ActionCtx<'a> {
+    pub fn new(page: Option<&'a Page>, step_index: usize) -> Self {
+        Self {
+            page,
+            step_index,
+            session: None,
+            step_timings: &[],
+        }
+    }
+
     /// The browser page, for actions whose `requires_page()` is `true`.
     /// The dispatch layer attaches a page before invoking such an action
     /// (and refuses the check otherwise), so the `Err` arm is unreachable
@@ -284,10 +303,7 @@ mod tests {
         // `cli/*`) yields an `ActionError`, never a panic — the dispatch
         // layer guarantees a page for `requires_page` actions, so this
         // arm is unreachable in practice but stays a clean error.
-        let ctx = ActionCtx {
-            page: None,
-            step_index: 0,
-        };
+        let ctx = ActionCtx::new(None, 0);
         assert!(ctx.require_page().is_err());
     }
 

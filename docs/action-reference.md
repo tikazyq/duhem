@@ -305,7 +305,7 @@ Make an HTTP request and observe the response.
 
 ### `api/observe`
 
-Observe a network request the page made (matched by method + URL pattern).
+Observe the first matching response, or set `window` to collect up to 256 matching requests by start time. `window` takes an earlier `from_step` on the same session, `edge: start | finish`, and a positive `duration`. `complete` reports whether the window elapsed before the wait ended. `truncated` reports overflow, and `count` is the number of returned entries.
 
 | `with:` field | required | values |
 |---|:---:|---|
@@ -313,12 +313,13 @@ Observe a network request the page made (matched by method + URL pattern).
 | `url_pattern` | yes | — |
 | `after` | no | — |
 | `timeout` | no | — |
+| `window` | no | — |
 
-**outputs:** `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body`, `request_headers`
+**outputs:** `method`, `url`, `status`, `body`, `body_text`, `body_bytes`, `headers`, `request_body`, `request_headers`, `count`, `requests`, `window`, `complete`, `truncated`
 
 ```yaml
 - uses: api/observe
-  with: { method: POST, url_pattern: "**/api/login" }
+  with: { method: POST, url_pattern: 're:/api/login$', window: { from_step: submit, edge: start, duration: 1s } }
 ```
 
 ### `api/poll`

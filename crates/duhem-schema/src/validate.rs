@@ -71,6 +71,7 @@ fn validate_lowered(
     let mut errs = Vec::new();
     crate::validate_sessions::validate(v, outputs_for, &mut errs);
     crate::validate_process::validate(v, &mut errs);
+    crate::validate_observe::validate(v, &mut errs);
 
     errs.extend(
         crate::flows::validate_authored(v)

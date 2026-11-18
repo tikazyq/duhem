@@ -64,10 +64,7 @@ mod tests {
     #[tokio::test]
     async fn parses_common_durations_and_waits_without_a_page() {
         let action = Wait;
-        let ctx = ActionCtx {
-            page: None,
-            step_index: 0,
-        };
+        let ctx = ActionCtx::new(None, 0);
         for raw in ["2s", "500ms"] {
             let with = serde_yml::from_str(&format!("duration: {raw}")).unwrap();
             let parsed: With = serde_yml::from_value(with).unwrap();

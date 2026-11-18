@@ -241,6 +241,15 @@ text or JSON conversion: `é` is `2`, an empty body is `0`; it is not
 `Content-Length`. `headers` has lower-case names; use a dotted path such as
 `headers.location` for hyphen-free names.
 
+Use `api/observe.with.window` to count requests or check for duplicates. Give
+the triggering step an `id:` and use `window: {from_step: submit, edge: start,
+duration: 1s}` to include requests it starts. Choose `edge: finish` for
+traffic that should start after the step. Put the observation after the
+trigger, on the same session, and give `timeout:` enough time for the window
+to close. Assert `complete == true` and `truncated == false` before relying on
+`count`, especially for a claim that no requests occurred. A complete window
+can still contain pending requests. See the [worked request-window check](../../../verifications/request-window-example/duhem.yml).
+
 Common shape (terse):
 
 ```yaml

@@ -40,7 +40,7 @@ use std::sync::Arc;
 
 use directories::ProjectDirs;
 use rust_embed::RustEmbed;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -859,6 +859,29 @@ impl Page {
         serde_json::from_value(v).map_err(|e| PwError(format!("pollNetwork decode: {e}")))
     }
 
+    /// Begin recording request lifecycle events before the first step runs.
+    pub async fn enable_request_recording(&self) -> Result<(), PwError> {
+        self.conn
+            .request("enableRequestRecording", self.p())
+            .await
+            .map(|_| ())
+    }
+
+    pub(crate) async fn request_window_batch(
+        &self,
+        from_ms: f64,
+        until_ms: f64,
+        cursor: Option<usize>,
+    ) -> Result<RequestWindowBatch, PwError> {
+        let mut req = self.p();
+        req["fromMs"] = json!(from_ms);
+        req["untilMs"] = json!(until_ms);
+        req["cursor"] = json!(cursor);
+        let response = self.conn.request("requestWindowBatch", req).await?;
+        serde_json::from_value(response)
+            .map_err(|e| PwError(format!("requestWindowBatch decode: {e}")))
+    }
+
     /// Current position on the per-check monotonic browser-session clock.
     pub async fn session_time_ms(&self) -> Result<f64, PwError> {
         let v = self.conn.request("sessionTime", self.p()).await?;
@@ -872,6 +895,22 @@ impl Page {
         let v = self.conn.request("sessionEvidence", self.p()).await?;
         serde_json::from_value(v).map_err(|e| PwError(format!("session evidence decode: {e}")))
     }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct RequestWindowBatch {
+    pub requests: Vec<WindowRequest>,
+    pub cursor: Option<usize>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct WindowRequest {
+    pub method: String,
+    pub url: String,
+    pub started_ms: f64,
+    pub status: Option<u16>,
+    pub state: String,
+    pub failure: Option<String>,
 }
 
 #[cfg(test)]

@@ -27,7 +27,7 @@ use axum::Router;
 use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use duhem_actions::{Action, ActionCtx, Click, Navigate, Observe, Outcome, RunBrowser};
+use duhem_actions::{Action, ActionCtx, Click, Navigate, Observe, Outcome, RunBrowser, StepTiming};
 use serde_yml::Value;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -104,7 +104,13 @@ async fn start_fixture() -> Fixture {
         .route("/api/projects", post(create_project))
         .route("/api/bad", get(bad_json))
         .route("/api/accent", get(accent))
-        .route("/api/gzip", get(gzipped));
+        .route("/api/gzip", get(gzipped))
+        .route("/traffic/fast", get(|| async { "fast" }))
+        .route(
+            "/traffic/redirect",
+            get(|| async { axum::response::Redirect::temporary("/traffic/fast") }),
+        )
+        .route("/traffic/hold", get(std::future::pending::<&'static str>));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -138,10 +144,7 @@ async fn observe_captures_fetch_triggered_by_click() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -209,10 +212,7 @@ async fn observe_after_click(button_name: &str, path: &str) -> duhem_actions::Ac
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -264,10 +264,7 @@ async fn observe_json_parse_failure_emits_observation() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -310,10 +307,7 @@ async fn observe_times_out_when_no_event_matches() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -336,4 +330,167 @@ async fn observe_times_out_when_no_event_matches() {
         elapsed < Duration::from_millis(2_000),
         "elapsed = {elapsed:?}"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn observe_window_tracks_request_starts_and_lifecycle() {
+    let fx = start_fixture().await;
+    let run = fresh_browser().await;
+    let check = run.open_check().await.unwrap();
+    let page = &check.page;
+    page.enable_request_recording().await.unwrap();
+    page.goto(&url(&fx), 5000.0).await.unwrap();
+    page.eval::<String>("fetch('/traffic/fast?before').then(r => r.text())")
+        .await
+        .unwrap();
+    let start = page.session_time_ms().await.unwrap();
+    page.eval::<bool>(
+        r#"(async () => {
+        window.pending = new AbortController();
+        const aborted = new AbortController();
+        fetch('/traffic/hold?pending', { signal: window.pending.signal }).catch(() => {});
+        await (await fetch('/traffic/fast?duplicate')).text();
+        await (await fetch('/traffic/fast?duplicate')).text();
+        fetch('/traffic/hold?aborted', { signal: aborted.signal }).catch(() => {});
+        await (await fetch('/traffic/redirect')).text();
+        aborted.abort();
+        return true;
+    })()"#,
+    )
+    .await
+    .unwrap();
+    let finish = page.session_time_ms().await.unwrap();
+    let duration = (finish - start).ceil() as u64 + 250;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    page.eval::<String>("window.pending.abort(); fetch('/traffic/fast?late').then(r => r.text())")
+        .await
+        .unwrap();
+    let timings = [StepTiming {
+        step_id: Some("trigger".into()),
+        session: Some("main".into()),
+        started_ms: start,
+        finished_ms: finish,
+    }];
+    let mut ctx = ActionCtx::new(Some(page), 1);
+    ctx.session = Some("main");
+    ctx.step_timings = &timings;
+    let with = yaml(&format!(
+        "url_pattern: 're:/traffic/'\nwindow: {{from_step: trigger, edge: start, duration: {duration}}}"
+    ));
+    let result = Observe.invoke(&ctx, &with).await.unwrap();
+    assert_eq!(result.outputs["count"], 6);
+    assert_eq!(result.outputs["complete"], true);
+    assert_eq!(result.outputs["truncated"], false);
+    let requests = result.outputs["requests"].as_array().unwrap();
+    let paths: Vec<_> = requests
+        .iter()
+        .map(|r| {
+            r["url"]
+                .as_str()
+                .unwrap()
+                .split_once("/traffic/")
+                .unwrap()
+                .1
+        })
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "hold?pending",
+            "fast?duplicate",
+            "fast?duplicate",
+            "hold?aborted",
+            "redirect",
+            "fast"
+        ]
+    );
+    assert_eq!(requests[0]["state"], "pending");
+    assert_eq!(requests[1]["state"], "finished");
+    assert_eq!(requests[3]["state"], "failed");
+    assert!(requests[3]["failure"].is_string());
+    assert_eq!(requests[4]["status"], 307);
+    assert_eq!(requests[5]["status"], 200);
+    assert!(!result.outputs.contains_key("body"));
+
+    let after = Observe
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+url_pattern: 're:/traffic/'
+window: {from_step: trigger, edge: finish, duration: 100ms}
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(after.outputs["count"], 0);
+    assert_eq!(after.outputs["complete"], true);
+
+    ctx.session = Some("other");
+    assert!(
+        Observe
+            .invoke(&ctx, &with)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("different browser session")
+    );
+    let ctx = ActionCtx::new(Some(page), 1);
+    assert!(
+        Observe
+            .invoke(&ctx, &with)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("no browser timing")
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires `npx playwright install chromium`"]
+async fn observe_window_caps_matches_and_returns_partial_results() {
+    let fx = start_fixture().await;
+    let run = fresh_browser().await;
+    let check = run.open_check().await.unwrap();
+    let page = &check.page;
+    page.enable_request_recording().await.unwrap();
+    page.goto(&url(&fx), 5000.0).await.unwrap();
+    let start = page.session_time_ms().await.unwrap();
+    page.eval::<bool>(
+        r#"(async () => {
+        for (let i = 0; i < 260; i++) await (await fetch(`/traffic/fast?i=${i}`)).text();
+        return true;
+    })()"#,
+    )
+    .await
+    .unwrap();
+    let timings = [StepTiming {
+        step_id: Some("mark".into()),
+        session: None,
+        started_ms: start,
+        finished_ms: start,
+    }];
+    let mut ctx = ActionCtx::new(Some(page), 1);
+    ctx.step_timings = &timings;
+    let result = Observe
+        .invoke(
+            &ctx,
+            &yaml(
+                r#"
+url_pattern: 're:/traffic/fast'
+timeout: 1ms
+window: {from_step: mark, edge: finish, duration: 2m}
+"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.outputs["count"], 256);
+    assert_eq!(result.outputs["complete"], false);
+    assert_eq!(result.outputs["truncated"], true);
+    let requests = result.outputs["requests"].as_array().unwrap();
+    assert_eq!(requests.len(), 256);
+    assert!(requests[255]["url"].as_str().unwrap().ends_with("?i=255"));
 }

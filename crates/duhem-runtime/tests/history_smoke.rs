@@ -64,10 +64,7 @@ async fn history_outputs_report_urls_and_navigated_for_every_entry_kind() {
     let fx = fixture().await;
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     let none = serde_yml::Value::Null;
     let list = format!("{}/", fx.url);
     let detail = format!("{}/detail", fx.url);

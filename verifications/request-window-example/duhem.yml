@@ -1,0 +1,27 @@
+# Point page_url at a running app with a Save button that sends POST /api/save.
+verification: One save sends one request
+spec_ref: https://github.com/onsager-ai/duhem/issues/663
+inputs:
+  page_url: { type: string }
+criteria:
+  - id: AC-1
+    description: A single save sends exactly one submission within two seconds.
+    checks:
+      - id: AC-1.1
+        steps:
+          - uses: ui/navigate
+            with: { url: $inputs.page_url }
+          - id: save
+            uses: ui/click
+            with: { role: button, name: Save }
+          - id: submissions
+            uses: api/observe
+            with:
+              method: POST
+              url_pattern: 're:/api/save$'
+              window: { from_step: save, edge: start, duration: 2s }
+              timeout: 3s
+        assertions:
+          - $steps.submissions.outputs.complete == true
+          - $steps.submissions.outputs.truncated == false
+          - $steps.submissions.outputs.count == 1

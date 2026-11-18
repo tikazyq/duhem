@@ -142,6 +142,7 @@ impl RunState {
 pub struct RunContext<'r> {
     run: &'r RunState,
     outputs: BTreeMap<(String, String), Value>,
+    pub(crate) step_timings: Vec<duhem_actions::StepTiming>,
     /// The active `for_each:` iteration's `as:` binding (#443 Tier 1),
     /// when this context is resolving a loop body step. At most one is
     /// ever active — nesting is capped at depth 1.
@@ -162,6 +163,7 @@ impl<'r> RunContext<'r> {
         Self {
             run,
             outputs,
+            step_timings: Vec::new(),
             loop_binding,
         }
     }

@@ -372,6 +372,11 @@ fn expand_sequence(
                 inner.group.insert(0, frame.clone());
             }
             result.steps.append(&mut expanded.steps);
+            for origin in &mut expanded.origins {
+                if let StepSourceOrigin::AuthoredCheck { groups, .. } = origin {
+                    groups.insert(0, inner_index);
+                }
+            }
             result.origins.append(&mut expanded.origins);
             result.projections.append(&mut expanded.projections);
             continue;
@@ -402,6 +407,7 @@ fn expand_sequence(
                 },
                 None => StepSourceOrigin::AuthoredCheck {
                     step_index: inner_index,
+                    groups: Vec::new(),
                 },
             });
             continue;
@@ -888,7 +894,7 @@ fn inherit_session(step: &mut Step, session: Option<&str>) {
             || step
                 .uses
                 .as_deref()
-                .is_some_and(|uses| uses.starts_with("ui/")))
+                .is_some_and(|uses| uses.starts_with("ui/") || uses == "api/observe"))
     {
         step.session = session.map(str::to_owned);
     }

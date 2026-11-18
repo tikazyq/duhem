@@ -307,6 +307,14 @@ pub enum ValidationError {
         location: Option<SourceLocation>,
     },
 
+    #[error("{site}: api/observe `window{field}` {message}")]
+    InvalidObserveWindow {
+        site: String,
+        field: &'static str,
+        message: &'static str,
+        location: Option<SourceLocation>,
+    },
+
     #[error("{message}")]
     InvalidNamedSession {
         message: String,
@@ -473,6 +481,7 @@ impl ValidationError {
             | Self::MalformedSetupRef { location, .. }
             | Self::InvalidSessionReference { location, .. }
             | Self::InvalidNamedSession { location, .. }
+            | Self::InvalidObserveWindow { location, .. }
             | Self::InvalidStepGroup { location, .. }
             | Self::UnknownAction { location, .. }
             | Self::InvalidStepCondition { location, .. }

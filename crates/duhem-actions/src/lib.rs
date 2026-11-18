@@ -25,7 +25,7 @@ pub mod with;
 
 pub use action::{
     Action, ActionContract, ActionCtx, ActionResult, DEFAULT_TIMEOUT, FieldSpec, Observation,
-    Outcome, layer_for_uses, uses_requires_page,
+    Outcome, StepTiming, layer_for_uses, uses_requires_page,
 };
 pub use api::{Call, Observe, Poll, Stream};
 pub use browser::{

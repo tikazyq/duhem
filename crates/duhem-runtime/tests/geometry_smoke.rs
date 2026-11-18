@@ -60,10 +60,7 @@ async fn frame_rect_is_frame_relative_and_page_rect_is_not() {
     let (url, server) = serve().await;
     let browser = RunBrowser::launch(false).await.unwrap();
     let check = browser.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &serde_yml::from_str(&format!("url: {url}")).unwrap())
         .await

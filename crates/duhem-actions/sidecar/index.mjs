@@ -130,6 +130,8 @@ const pages = new Map()
 const networkBuffers = new Map()
 /** @type {Map<string, number>} */
 const sessionStarts = new Map()
+/** @type {Map<string, RequestRecord[]>} */
+const requestRecordings = new Map()
 // Video recording (#215) is per-context and finalized only on
 // context close. When a context is opened with `recordVideo`, we keep
 // its scratch dir (to clean up) and the page's `Video` handle (to read
@@ -216,6 +218,47 @@ function attachNetworkRecorder(p, buf, sessionStart) {
     rec.durationMs = Math.max(0, finishedAt - start.mono)
     buf.push(rec)
   })
+}
+
+// Keep one entry per Playwright Request object, including every redirect hop.
+// Record transitions on the session clock so a past window can be read as it
+// stood when it closed, even if the request has since finished.
+/**
+ * @typedef {{method: string, url: string, startedMs: number, responseMs?: number,
+ *   status?: number, finishedMs?: number, failed?: boolean, failure?: string}} RequestRecord
+ * @param {Page} page
+ * @param {number} sessionStart
+ */
+function recordRequests(page, sessionStart) {
+  /** @type {RequestRecord[]} */
+  const records = []
+  /** @type {WeakMap<import('playwright').Request, RequestRecord>} */
+  const byRequest = new WeakMap()
+  const now = () => performance.now() - sessionStart
+  page.on('request', (request) => {
+    const record = { method: request.method().toUpperCase(), url: request.url(), startedMs: now() }
+    records.push(record)
+    byRequest.set(request, record)
+  })
+  page.on('response', (response) => {
+    const record = byRequest.get(response.request())
+    if (record) {
+      record.responseMs = now()
+      record.status = response.status()
+    }
+  })
+  /** @param {import('playwright').Request} request @param {boolean} failed */
+  const finish = (request, failed) => {
+    const record = byRequest.get(request)
+    if (record) {
+      record.finishedMs = now()
+      record.failed = failed
+      record.failure = failed ? request.failure()?.errorText : undefined
+    }
+  }
+  page.on('requestfinished', (request) => finish(request, false))
+  page.on('requestfailed', (request) => finish(request, true))
+  return records
 }
 
 // Buffered observers are installed before navigation. Unsupported entry types
@@ -694,6 +737,43 @@ async function dispatch(req) {
       if (!buf) throw new Error(`unknown pageId: ${req.pageId}`)
       const from = req.cursor || 0
       return { events: buf.slice(from), cursor: buf.length }
+    }
+
+    case 'enableRequestRecording': {
+      const p = page(req)
+      if (!requestRecordings.has(req.pageId)) {
+        const start = sessionStarts.get(req.pageId)
+        if (start === undefined) throw new Error(`unknown pageId: ${req.pageId}`)
+        requestRecordings.set(req.pageId, recordRequests(p, start))
+        p.once('close', () => requestRecordings.delete(req.pageId))
+      }
+      return null
+    }
+
+    case 'requestWindowBatch': {
+      const records = requestRecordings.get(req.pageId)
+      if (!records) throw new Error('request recorder is not enabled for this page')
+      // Seek to the first request in range, then read in bounded batches.
+      let low = req.cursor ?? 0
+      let high = req.cursor ?? records.length
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2)
+        if (records[mid].startedMs < req.fromMs) low = mid + 1
+        else high = mid
+      }
+      const requests = []
+      while (requests.length < 128 && low < records.length && records[low].startedMs < req.untilMs) {
+        const { method, url, startedMs, responseMs, status, finishedMs, failed, failure } = records[low++]
+        const done = finishedMs !== undefined && finishedMs < req.untilMs
+        requests.push({
+          method, url, started_ms: startedMs,
+          status: responseMs !== undefined && responseMs < req.untilMs ? status : null,
+          state: done ? (failed ? 'failed' : 'finished') : 'pending',
+          failure: done ? (failure ?? null) : null,
+        })
+      }
+      const cursor = low < records.length && records[low].startedMs < req.untilMs ? low : null
+      return { requests, cursor }
     }
 
     case 'sessionTime': {

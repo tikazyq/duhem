@@ -207,10 +207,7 @@ async fn navigate_succeeds_against_fixture() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     let r = Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -224,10 +221,7 @@ async fn click_present_button_succeeds() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -245,10 +239,7 @@ async fn assert_element_visible_present_satisfies() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -283,10 +274,7 @@ async fn assert_element_not_exists_with_present_alert_returns_false() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -321,10 +309,7 @@ async fn assert_element_timeout_returns_satisfied_false_quickly() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -365,10 +350,7 @@ async fn type_fills_input_then_assert_element_reads_it_back() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -406,10 +388,7 @@ async fn locator_strategies_label_testid_css_xpath_placeholder_resolve() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -524,10 +503,7 @@ text: "crawlab"
 async fn extract_distinguishes_attribute_property_counts_and_direct_assertion() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", static_data_url())))
         .await
@@ -626,10 +602,7 @@ const GEOMETRY_HTML: &str = r#"<!doctype html>
 async fn extract_rect_and_style_report_css_px_with_controls() {
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     let data_url = format!(
         "data:text/html;base64,{}",
         base64::engine::general_purpose::STANDARD.encode(GEOMETRY_HTML)
@@ -720,10 +693,7 @@ async fn select_by_value_label_index_dispatches_to_playwright() {
         (r#"by: { index: 3 }"#, "viewer"),
     ] {
         let check = run.open_check().await.unwrap();
-        let ctx = ActionCtx {
-            page: Some(&check.page),
-            step_index: 0,
-        };
+        let ctx = ActionCtx::new(Some(&check.page), 0);
         Navigate
             .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
             .await
@@ -747,10 +717,7 @@ async fn assert_url_passes_on_navigation_and_times_out_on_stale_url() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: {}", url(&fx))))
         .await
@@ -817,10 +784,7 @@ async fn assert_element_observes_loaded_page_marker() {
     let fx = start_fixture().await;
     let run = fresh_browser().await;
     let check = run.open_check().await.unwrap();
-    let ctx = ActionCtx {
-        page: Some(&check.page),
-        step_index: 0,
-    };
+    let ctx = ActionCtx::new(Some(&check.page), 0);
     Navigate
         .invoke(&ctx, &yaml(&format!("url: http://{}/thanks", fx.addr)))
         .await

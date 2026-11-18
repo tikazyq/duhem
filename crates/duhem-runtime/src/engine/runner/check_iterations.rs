@@ -27,6 +27,27 @@ impl Engine {
                 }
             })
             .collect();
+        let recording_sessions: BTreeSet<_> = check
+            .steps
+            .iter()
+            .filter(|step| {
+                step.uses_name() == "api/observe"
+                    && step
+                        .with
+                        .get("window")
+                        .is_some_and(|window| !window.is_null())
+            })
+            .map(|step| &step.session)
+            .collect();
+        for session in &recording_sessions {
+            if let Some(cb) = contexts.browsers.get(*session) {
+                cb.page
+                    .enable_request_recording()
+                    .await
+                    .map_err(|error| EngineError::Browser(error.to_string()))?;
+            }
+        }
+        let record_timings = !recording_sessions.is_empty();
         let has_loop = authored.steps.iter().any(|s| s.for_each.is_some());
         let mut evidence = vec![StepEvidence::empty(); check.steps.len()];
         let mut cleanup = BTreeSet::new();
@@ -53,6 +74,7 @@ impl Engine {
                     offset..offset + 1,
                     None,
                     environment_failed,
+                    record_timings,
                     &mut failed_by,
                     &mut groups,
                     &mut stored_error,
@@ -198,6 +220,7 @@ impl Engine {
                     range.clone(),
                     Some(ordinal),
                     environment_failed,
+                    record_timings,
                     &mut failed_by,
                     &mut groups,
                     &mut stored_error,

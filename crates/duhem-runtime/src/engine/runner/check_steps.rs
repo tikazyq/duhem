@@ -13,6 +13,7 @@ impl Engine {
         indices: std::ops::Range<usize>,
         iteration: Option<u32>,
         environment_failed: bool,
+        record_timings: bool,
         failed_by: &mut Option<String>,
         groups: &mut GroupGates,
         stored_error: &mut Option<EngineError>,
@@ -251,11 +252,20 @@ impl Engine {
                     {
                         Some(Err(error))
                     } else {
-                        let page_ref: Option<&Page> = check_browser.as_ref().map(|cb| &cb.page);
+                        let page = check_browser.map(|cb| &cb.page);
+                        let started_ms = match page {
+                            Some(page) if record_timings => step_time(page).await,
+                            _ => None,
+                        };
+                        let action_ctx = duhem_actions::ActionCtx {
+                            page,
+                            step_index: idx,
+                            session: step.session.as_deref(),
+                            step_timings: &ctx.step_timings,
+                        };
                         let result = crate::engine::registry::invoke_scoped(
                             dispatcher.as_ref(),
-                            page_ref,
-                            idx,
+                            &action_ctx,
                             &resolved_with,
                             &self.child_process_env(writer.run_id()),
                             ctx.run_state(),
@@ -263,6 +273,16 @@ impl Engine {
                             writer,
                         )
                         .await;
+                        if let (Some(page), Some(started_ms)) = (page, started_ms)
+                            && let Some(finished_ms) = step_time(page).await
+                        {
+                            ctx.step_timings.push(duhem_actions::StepTiming {
+                                step_id: step.id.clone(),
+                                session: step.session.clone(),
+                                started_ms,
+                                finished_ms,
+                            });
+                        }
                         if let Ok(r) = &result {
                             crate::engine::secret_output::register(
                                 writer,
@@ -395,5 +415,15 @@ impl Engine {
         }
 
         Ok(())
+    }
+}
+
+async fn step_time(page: &Page) -> Option<f64> {
+    match page.session_time_ms().await {
+        Ok(time) => Some(time),
+        Err(error) => {
+            tracing::debug!(%error, "could not record step boundary");
+            None
+        }
     }
 }
