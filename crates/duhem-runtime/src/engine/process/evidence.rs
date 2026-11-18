@@ -129,6 +129,7 @@ impl Processes {
             append!(EventPayload::SetupFinished {
                 phase: StepPhase::Teardown,
                 aborted: false,
+                abort_cause: None,
                 fixture_name: None,
                 check_id: scope.check.clone(),
                 criterion_id: scope.criterion.clone(),

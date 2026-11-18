@@ -10,9 +10,8 @@
 //!
 //! Invariants (enforced by the store, not by convention):
 //!
-//! - The runtime is the **sole writer**; the judge stays a pure
-//!   evaluator handing it verdicts. The dashboard reads through a
-//!   read-only handle.
+//! - The runtime writes local evidence. Dashboard ingest replays imported
+//!   evidence and uses the same projections. The read API uses a read-only handle.
 //! - Rows are **insert-only**; a run is sealed once its verdict
 //!   lands. The `events` table is the wire-format stream (#10); the
 //!   normalized tables are same-transaction projections of it.

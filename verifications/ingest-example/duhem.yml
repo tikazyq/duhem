@@ -1,0 +1,36 @@
+# Run from the repository root with both binaries built. See docs/distributed-runs.md.
+verification: Automatic dashboard delivery
+inputs:
+  duhem_bin: {type: string}
+  dashboard_bin: {type: string}
+  work_dir: {type: string}
+  base_url: {type: string, default: 'http://127.0.0.1:18787'}
+criteria:
+  - id: DELIVERY
+    description: A completed run becomes queryable in a separate dashboard store without a manual ship command.
+    checks:
+      - id: delivered
+        setup:
+          - id: dashboard
+            uses: process/start
+            with:
+              command: $inputs.dashboard_bin
+              args: [--ingest, --port, '18787', --db, '$runtime.concat($inputs.work_dir, "/hub.db")']
+              ready:
+                http: {url: '$runtime.concat($inputs.base_url, "/api/runs")', status: 200}
+                timeout: 5s
+        steps:
+          - id: produce
+            uses: cli/invoke
+            with:
+              # Start a separate invocation with an independent source store.
+              command: [env, -u, DUHEM_PARENT_RUN_ID, -u, DUHEM_PARENT_DB_PATH, $inputs.duhem_bin, run, verifications/ingest-example/fixture/leaf.yml, --no-env-file, --no-live, --run-id, delivered, --db, '$runtime.concat($inputs.work_dir, "/source.db")']
+              env: {DUHEM_HUB_URL: '$runtime.concat($inputs.base_url, "/api/ingest")'}
+              timeout: 35s
+          - id: inspect
+            uses: api/call
+            with: {method: GET, url: '$runtime.concat($inputs.base_url, "/api/runs/delivered")'}
+        assertions:
+          - $steps.produce.outputs.exit_code == 0
+          - $steps.inspect.outputs.status == 200
+          - $steps.inspect.outputs.body.verdict == "pass"

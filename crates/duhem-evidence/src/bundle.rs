@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-use crate::event::{Event, EventPayload, ObservationValue, VerdictState};
+use crate::event::{Event, EventPayload, ObservationValue, RunOrigin, VerdictState};
 use crate::store::{RunRecord, Store, StoreError};
 
 /// Version of the bundle wire shape. Breaking shape changes bump it;
@@ -69,6 +69,16 @@ pub struct BundleRun {
     pub target_repo: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<RunOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shard: Option<duhem_summary::ShardIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_partition: Option<duhem_summary::ExpectedPartition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -95,8 +105,7 @@ impl RunBundle {
             .await?
             .ok_or_else(|| StoreError::UnknownRun(run_id.to_string()))?;
         let events = store.run_events(run_id).await?;
-        let mut shas = referenced_blobs(&events);
-        shas.sort();
+        let shas = referenced_blobs(&events);
         let counts = referenced_blob_mask_counts(&events);
         let mut artifacts = Vec::with_capacity(shas.len());
         for sha in shas {
@@ -113,7 +122,7 @@ impl RunBundle {
         }
         Ok(Self {
             bundle_version: BUNDLE_VERSION,
-            run: bundle_run(&record),
+            run: bundle_run(&record, &events),
             events,
             artifacts,
         })
@@ -229,7 +238,15 @@ impl RunBundle {
     }
 }
 
-fn bundle_run(record: &RunRecord) -> BundleRun {
+pub(crate) fn distributed_plan(events: &[Event]) -> Option<&duhem_summary::DistributedRun> {
+    events.iter().find_map(|event| match &event.payload {
+        EventPayload::ClaimScopeDeclared { scope } => Some(&scope.distributed),
+        _ => None,
+    })
+}
+
+fn bundle_run(record: &RunRecord, events: &[Event]) -> BundleRun {
+    let plan = distributed_plan(events).cloned().unwrap_or_default();
     BundleRun {
         run_id: record.run_id.clone(),
         verification: record.verification.clone(),
@@ -244,25 +261,33 @@ fn bundle_run(record: &RunRecord) -> BundleRun {
         verifier_sha: record.scope.verifier_sha.clone(),
         target_repo: record.scope.target_repo.clone(),
         target_sha: record.scope.target_sha.clone(),
+        parent_run_id: record.lineage.parent_run_id.clone(),
+        origin: record.lineage.origin,
+        shard: plan.shard,
+        manifest_digest: plan.manifest_digest,
+        expected_partition: plan.expected_partition,
     }
 }
 
 /// Every content address the event stream references — observation
 /// blobs plus captured env stdio.
 pub fn referenced_blobs(events: &[Event]) -> Vec<String> {
-    let mut shas: Vec<String> = Vec::new();
+    let mut shas = std::collections::BTreeSet::new();
     let mut push = |sha: &String| {
-        if !shas.contains(sha) {
-            shas.push(sha.clone());
-        }
+        shas.insert(sha.clone());
     };
     for evt in events {
         match &evt.payload {
             EventPayload::NativeRunFinished { result } => {
-                if let Some(sha) = &result.stdout_blob_sha256 {
-                    push(sha);
-                }
-                if let Some(sha) = &result.stderr_blob_sha256 {
+                for sha in [
+                    &result.stdout_blob_sha256,
+                    &result.stderr_blob_sha256,
+                    &result.report_blob_sha256,
+                    &result.results_blob_sha256,
+                ]
+                .into_iter()
+                .flatten()
+                {
                     push(sha);
                 }
             }
@@ -294,7 +319,7 @@ pub fn referenced_blobs(events: &[Event]) -> Vec<String> {
             _ => {}
         }
     }
-    shas
+    shas.into_iter().collect()
 }
 
 fn referenced_blob_mask_counts(

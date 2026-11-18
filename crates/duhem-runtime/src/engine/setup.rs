@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use duhem_actions::RunBrowser;
 use duhem_evidence::{EventPayload, EvidenceWriter, StepPhase};
-use duhem_judge::InconclusiveCause;
+use duhem_judge::{InconclusiveCause, VerdictState};
 use duhem_schema::Step;
 
 use crate::engine::context::RunState;
@@ -510,6 +510,7 @@ async fn run_lifecycle_steps(
         .append(EventPayload::SetupFinished {
             phase,
             aborted: aborted.is_some(),
+            abort_cause: aborted.map(|reason| VerdictState::Inconclusive(reason.cause())),
             fixture_name,
             check_id,
             criterion_id,

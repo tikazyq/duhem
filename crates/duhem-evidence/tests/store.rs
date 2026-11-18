@@ -97,6 +97,44 @@ async fn write_worked_example(store: Arc<SqliteStore>) {
 }
 
 #[tokio::test]
+async fn ingest_rolls_back_projections_and_receipt_on_commit_path_failure() {
+    let (_source_dir, source) = open_store().await;
+    write_worked_example(source.clone()).await;
+    let bundle = RunBundle::from_store(source.as_ref(), RUN_ID)
+        .await
+        .unwrap();
+    let bytes = bundle.wire_bytes().unwrap();
+    let hash = bundle.content_hash().unwrap();
+    let (_target_dir, target) = open_store().await;
+    // Fail the final write after the run and all its projections were inserted.
+    sqlx::query("CREATE TRIGGER reject_receipt BEFORE INSERT ON ingest_receipts BEGIN SELECT RAISE(ABORT, 'test receipt failure'); END")
+        .execute(target.pool()).await.unwrap();
+    assert!(target.ingest_bundle(&bytes, &hash).await.is_err());
+    for table in [
+        "runs",
+        "events",
+        "assertions",
+        "checks",
+        "criteria",
+        "run_verdicts",
+        "run_terminals",
+        "ingest_receipts",
+    ] {
+        let rows: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+            .fetch_one(target.pool())
+            .await
+            .unwrap();
+        assert_eq!(rows, 0, "{table} survived rollback");
+    }
+    sqlx::query("DROP TRIGGER reject_receipt")
+        .execute(target.pool())
+        .await
+        .unwrap();
+    target.ingest_bundle(&bytes, &hash).await.unwrap();
+    assert_eq!(target.run_events(RUN_ID).await.unwrap(), bundle.events);
+}
+
+#[tokio::test]
 async fn round_trip_worked_example() {
     let (_tmp, store) = open_store().await;
     write_worked_example(store.clone()).await;

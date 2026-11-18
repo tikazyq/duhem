@@ -742,6 +742,7 @@ fn fold_lifecycle(events: &[duhem_evidence::Event]) -> Vec<LifecycleBlock> {
             EventPayload::SetupFinished {
                 phase,
                 aborted,
+                abort_cause: _,
                 fixture_name,
                 check_id,
                 criterion_id,

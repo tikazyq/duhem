@@ -499,6 +499,7 @@ where
 {
     let exact: HashSet<&str> = ["PATH", "HOME", "TMPDIR", "LANG"].into_iter().collect();
     iter.into_iter()
+        .filter(|(k, _)| !matches!(k.as_str(), "DUHEM_HUB_TOKEN" | "DUHEM_HUB_URL"))
         .filter(|(k, _)| {
             exact.contains(k.as_str()) || k.starts_with("LC_") || k.starts_with("DUHEM_")
         })

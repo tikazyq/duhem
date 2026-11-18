@@ -388,6 +388,9 @@ pub enum EventPayload {
         #[serde(default, skip_serializing_if = "StepPhase::is_setup")]
         phase: StepPhase,
         aborted: bool,
+        /// Precondition that blocked the body, when recorded by the runtime.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        abort_cause: Option<VerdictState>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fixture_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -818,6 +821,7 @@ mod tests {
             EventPayload::SetupFinished {
                 phase: StepPhase::Setup,
                 aborted: false,
+                abort_cause: None,
                 fixture_name: None,
                 check_id: None,
                 criterion_id: None,
@@ -872,6 +876,7 @@ mod tests {
             EventPayload::SetupFinished {
                 phase: StepPhase::Setup,
                 aborted: false,
+                abort_cause: None,
                 fixture_name: None,
                 check_id: None,
                 criterion_id: None,
@@ -882,6 +887,7 @@ mod tests {
             EventPayload::SetupFinished {
                 phase: StepPhase::Setup,
                 aborted: true,
+                abort_cause: None,
                 fixture_name: None,
                 check_id: None,
                 criterion_id: None,

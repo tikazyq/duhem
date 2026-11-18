@@ -12,14 +12,18 @@ pub(crate) struct InvocationParent {
 
 pub(crate) struct RunStore {
     pub db_path: PathBuf,
-    pub store: Arc<dyn Store>,
+    pub store: Arc<SqliteStore>,
     pub parent: Option<InvocationParent>,
 }
 
-pub(crate) async fn open(explicit_db: Option<&Path>) -> Result<RunStore, String> {
-    let parent_id = std::env::var(duhem_runtime::PARENT_RUN_ID_ENV)
+pub(crate) fn invocation_parent_id() -> Option<String> {
+    std::env::var(duhem_runtime::PARENT_RUN_ID_ENV)
         .ok()
-        .filter(|value| !value.is_empty());
+        .filter(|value| !value.is_empty())
+}
+
+pub(crate) async fn open(explicit_db: Option<&Path>) -> Result<RunStore, String> {
+    let parent_id = invocation_parent_id();
     let parent_db = parent_id.as_ref().and_then(|_| {
         std::env::var_os(duhem_runtime::PARENT_DB_PATH_ENV)
             .filter(|value| !value.is_empty())
@@ -36,7 +40,7 @@ pub(crate) async fn open(explicit_db: Option<&Path>) -> Result<RunStore, String>
             duhem_evidence::project_db_path(&cwd).map_err(|e| format!("resolve store: {e}"))?
         }
     };
-    let store: Arc<dyn Store> = Arc::new(
+    let store = Arc::new(
         SqliteStore::open(&db_path)
             .await
             .map_err(|e| format!("open store {}: {e}", db_path.display()))?,

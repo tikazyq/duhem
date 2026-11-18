@@ -180,6 +180,7 @@ impl Plan {
         &self,
         store: Arc<dyn Store>,
         path: &Path,
+        enclosing: Option<&crate::run_lineage::InvocationParent>,
     ) -> Result<(), duhem_evidence::WriterError> {
         let id = self
             .metadata
@@ -187,12 +188,34 @@ impl Plan {
             .as_deref()
             .expect("shard parent");
         if store.get_run(id).await?.is_none() {
-            let mut writer =
-                EvidenceWriter::begin(store, id, &path.to_string_lossy(), BTreeMap::new()).await?;
+            let (scope, lineage) = enclosing
+                .map(|parent| {
+                    (
+                        parent.scope.clone(),
+                        RunLineage {
+                            parent_run_id: Some(parent.run_id.clone()),
+                            origin: Some(RunOrigin::Invocation),
+                        },
+                    )
+                })
+                .unwrap_or_default();
+            let path = path.to_string_lossy();
+            let mut writer = EvidenceWriter::begin_scoped_with_secrets_and_lineage(
+                store,
+                id,
+                &path,
+                BTreeMap::new(),
+                scope,
+                lineage.clone(),
+                Default::default(),
+            )
+            .await?;
             writer
-                .append(duhem_evidence::run_started(
-                    path.to_string_lossy(),
+                .append(duhem_evidence::run_started_with_definition_and_lineage(
+                    path,
                     BTreeMap::new(),
+                    None,
+                    lineage,
                 ))
                 .await?;
             writer.finish().await?;

@@ -4,9 +4,8 @@
 //! `export` writes the human-browsable directory layout; `ship`
 //! POSTs the canonical JSON envelope to a hub's ingest endpoint,
 //! keyed by the bundle's content hash so re-shipping the same run is
-//! a server-side no-op. The hub server itself is the closed-source
-//! sibling (#188 open-core seam) — this repo owns only the client
-//! and the wire contract (`tests/bundle_contract.rs` pins it).
+//! a server-side no-op. The hosted hub and OSS dashboard use the
+//! same envelope.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -87,7 +86,18 @@ pub async fn run_ship(
             return ExitCode::FAILURE;
         }
     };
-    match ship_bundle(&bundle, &url, std::env::var(HUB_TOKEN_ENV).ok().as_deref()).await {
+    let result = async {
+        let client = ship_client(std::time::Duration::from_secs(60))?;
+        ship_bundle(
+            &client,
+            &bundle,
+            &url,
+            std::env::var(HUB_TOKEN_ENV).ok().as_deref(),
+        )
+        .await
+    }
+    .await;
+    match result {
         Ok(hash) => {
             println!("shipped run {run_id} to {url} (content hash {hash})");
             ExitCode::SUCCESS
@@ -101,19 +111,16 @@ pub async fn run_ship(
 
 /// The ingest client (#194): one POST of the canonical envelope.
 /// Idempotency: the `X-Duhem-Content-Hash` header carries the
-/// bundle's hash; a hub that has it already answers 200/409 without
+/// bundle's hash; a hub that has it already answers 2xx without
 /// re-storing. 2xx = shipped.
 pub async fn ship_bundle(
+    client: &reqwest::Client,
     bundle: &RunBundle,
     url: &str,
     token: Option<&str>,
 ) -> Result<String, String> {
     let body = bundle.wire_bytes().map_err(|e| e.to_string())?;
-    let hash = bundle.content_hash().map_err(|e| e.to_string())?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let hash = duhem_evidence::distributed::manifest_digest(&body);
     let mut req = client
         .post(url)
         .header("content-type", "application/json")
@@ -123,11 +130,21 @@ pub async fn ship_bundle(
     if let Some(token) = token {
         req = req.bearer_auth(token);
     }
-    let res = req.send().await.map_err(|e| e.to_string())?;
+    let res = req.send().await.map_err(|e| e.without_url().to_string())?;
     if !res.status().is_success() {
         let status = res.status();
-        let text = res.text().await.unwrap_or_default();
-        return Err(format!("hub answered {status}: {}", text.trim()));
+        return Err(format!("hub answered {status}"));
     }
     Ok(hash)
+}
+
+/// A delivery attempt is one POST, even when the server redirects or
+/// the HTTP client would otherwise transparently retry.
+pub fn ship_client(timeout: std::time::Duration) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .build()
+        .map_err(|e| e.to_string())
 }

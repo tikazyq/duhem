@@ -67,7 +67,26 @@ pub struct RunArgs {
     pub viewport: Option<duhem_schema::Viewport>,
 }
 
-pub async fn run_command(args: RunArgs) -> ExitCode {
+pub async fn run_command(
+    args: RunArgs,
+    mut delivery: Option<crate::delivery::Delivery>,
+) -> ExitCode {
+    let parent = crate::run_lineage::invocation_parent_id();
+    if parent.is_some() {
+        delivery = None;
+    }
+    let exit = execute(args, parent.as_deref(), delivery.as_mut()).await;
+    if let Some(delivery) = delivery {
+        delivery.send().await;
+    }
+    exit
+}
+
+async fn execute(
+    args: RunArgs,
+    parent: Option<&str>,
+    mut delivery: Option<&mut crate::delivery::Delivery>,
+) -> ExitCode {
     let RunArgs {
         path,
         file,
@@ -88,13 +107,25 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         viewport: viewport_override,
     } = args;
 
-    let detection = match crate::shard::detect(shard.as_deref(), pinned_run_id.as_deref(), |key| {
-        std::env::var(key).ok()
-    }) {
-        Ok(value) => value,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
+    // A nested invocation does not inherit the enclosing job's shard
+    // selection. Explicit nested shards are scoped to the enclosing run.
+    let detection = if parent.is_some() && shard.is_none() {
+        None
+    } else {
+        match crate::shard::detect(shard.as_deref(), pinned_run_id.as_deref(), |key| {
+            std::env::var(key).ok()
+        }) {
+            Ok(value) => value.map(|mut detection| {
+                if let Some(parent) = parent {
+                    detection.identity = serde_json::to_string(&(parent, &detection.identity))
+                        .expect("string identity serializes");
+                }
+                detection
+            }),
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::FAILURE;
+            }
         }
     };
     if detection.is_some() {
@@ -468,10 +499,18 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
     }
 
     if let Some(plan) = &shard_plan
-        && let Err(error) = plan.ensure_parent(store.clone(), &target).await
+        && let Err(error) = plan
+            .ensure_parent(store.clone(), &target, invocation_parent.as_ref())
+            .await
     {
         eprintln!("shard parent: {error}");
         return ExitCode::FAILURE;
+    }
+    if let Some(delivery) = delivery.as_deref_mut() {
+        delivery.store = Some(store.clone());
+        delivery.shard_parent = shard_plan
+            .as_ref()
+            .and_then(|plan| plan.metadata.parent_run_id.clone());
     }
     let mut suite_native = Vec::new();
     let mut suite_parent_id: Option<String> = None;
@@ -503,6 +542,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         };
         let suite_run_id = duhem_evidence::new_run_id();
         suite_parent_id = Some(suite_run_id.clone());
+        if let Some(delivery) = delivery.as_deref_mut() {
+            delivery.root = Some(suite_run_id.clone());
+        }
         if let Some(base) = dashboard_base.as_deref() {
             let url = crate::live_link::run_page_url(base, &suite_run_id);
             eprintln!("live: {url}");
@@ -796,7 +838,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         // does. With no dashboard in sight the engine mints as before.
         let run_id: Option<String> = match pinned_run_id.as_deref() {
             Some(id) => Some(id.to_string()),
-            None if dashboard_base.is_some() => Some(duhem_evidence::new_run_id()),
+            None if dashboard_base.is_some() || delivery.is_some() => {
+                Some(duhem_evidence::new_run_id())
+            }
             None => None,
         };
         if let Some(id) = run_id.as_deref() {
@@ -892,6 +936,12 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
         let outcome = match engine.run_with_metadata(&def, inputs).await {
             Ok(o) => o,
             Err(e) => {
+                if !is_manifest
+                    && matches!(e, duhem_runtime::EngineError::Aborted { .. })
+                    && let Some(delivery) = delivery.as_deref_mut()
+                {
+                    delivery.root = run_id;
+                }
                 if let Some(r) = renderer {
                     r.abort();
                 }
@@ -902,6 +952,9 @@ pub async fn run_command(args: RunArgs) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        if !is_manifest && let Some(delivery) = delivery.as_deref_mut() {
+            delivery.root = Some(outcome.run_id.clone());
+        }
         if let Some(r) = renderer {
             // Returns as soon as the renderer consumed `run_finished`
             // (already sent — the run is over), so no reporter output

@@ -20,13 +20,19 @@ The canonical wire form is the compact JSON serialization of
     "schema_version": "v1",             // trace wire version (#10)
     "inputs": { … },
     "started_at": "2026-07-06T00:00:00.000Z",
-    // present once judged:
+    // verdict present once judged, timing present once terminal:
     "verdict": "pass",                  // pass | fail | inconclusive:<cause>
     "finished_at": "…", "duration_ms": 1000,
     // #190 scope + provenance (all optional):
     "project_id": "github.com/acme/app",
     "verifier_repo": "github.com/onsager-ai/duhem", "verifier_sha": "…",
-    "target_repo": "github.com/acme/app", "target_sha": "…"
+    "target_repo": "github.com/acme/app", "target_sha": "…",
+    // Optional lineage and distributed plan fields:
+    "parent_run_id": "01…", "origin": "shard",  // suite | invocation | shard
+    "shard": {"index": 1, "total": 2, "source": "flag"},
+    "manifest_digest": "…64 lowercase hex…",
+    "expected_partition": {"units": ["…"], "total_units": 2,
+      "excluded": [{"unit": "…", "reason": "shard"}]}
   },
   "events": [ { "seq": 0, "ts": "…", "kind": "…", … } ],   // full #10 stream, seq order
   "artifacts": [ { "sha256": "…64 hex…", "bytes_base64": "…" } ]  // sorted by sha
@@ -58,12 +64,25 @@ safe.
 | `X-Duhem-Content-Hash` | the content hash |
 | `Authorization` | `Bearer <DUHEM_HUB_TOKEN>` (when configured) |
 
-2xx = ingested (or already present). Anything else is surfaced to
-the operator; the `duhem/run` CI ship step never gates the verdict
-(`continue-on-error`), because delivery of evidence must not change
-what the evidence says.
+The URL is the full endpoint, including `/api/ingest` for the OSS dashboard.
+A 2xx response acknowledges a committed run or an identical resend. The
+dashboard verifies the SHA-256 against the received bytes, validates lifecycle
+and artifact references, and replays judged traces before inserting the events,
+blobs, projections and receipt in a single SQLite transaction. Run IDs are
+ASCII letters, digits, hyphens or underscores. A conflicting run ID or missing
+parent returns 409. The shared shard parent is an unjudged `run_started`-only
+placeholder. Multiple machines can deliver that parent ID with different local
+start times and paths. The first accepted parent record is retained.
 
-The v1 transport is a single JSON envelope (base64 artifacts). Runs
+Automatic delivery sends one v1 envelope per run, in parent-first order, with
+its own hash. `parent_run_id` and `origin` describe the immediate parent link.
+Shard fields describe the enclosing shard even on a suite leaf. Referenced
+native stdout, stderr, reports and parsed results travel with the run. New
+traces can record the optional `setup_finished.abort_cause` and claim-scope
+preconditions so replay can reconstruct early and native-only outcomes.
+
+The v1 transport is a single JSON envelope (base64 artifacts). The OSS dashboard
+limits each request body to 16 MiB, including base64. Runs
 with large artifact sets may outgrow it; a chunked/multipart
 transport would be `bundle_version: 2` — tracked as the open
 question on #194.

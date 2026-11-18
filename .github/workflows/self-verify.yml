@@ -96,6 +96,7 @@ jobs:
             dashboard:
               - 'crates/duhem-dashboard/**'
               - 'verifications/duhem-dashboard/**'
+              - 'verifications/ingest-example/**'
               - '.github/workflows/self-verify.yml'
 
   cli-regression:
@@ -132,6 +133,9 @@ jobs:
           node-version: '24'
 
       - name: Run native worked example
+        env:
+          DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
+          DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
         run: |
           ./target/release/duhem run verifications/native-example \
             --db .duhem/duhem.db
@@ -146,12 +150,18 @@ jobs:
       # freshly built artifact rather than whatever is on PATH. A
       # non-pass verdict exits non-zero and fails the job.
       - name: Run duhem-cli regression VD
+        env:
+          DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
+          DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
         run: |
           ./target/release/duhem run verifications/duhem-cli \
             --db .duhem/duhem.db \
             --inputs duhem_bin="$PWD/target/release/duhem"
 
       - name: Run owned-process example against a real local HTTP service
+        env:
+          DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
+          DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
         run: |
           ./target/release/duhem run verifications/owned-process-example \
             --db .duhem/duhem.db \
@@ -159,37 +169,28 @@ jobs:
           test ! -e "${RUNNER_TEMP}/owned-process-example-state"
 
       - name: Run check-conditions example against in-memory SQLite
+        env:
+          DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
+          DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
         run: |
           ./target/release/duhem run verifications/check-conditions-example \
             --db .duhem/duhem.db
 
       - name: Run flow-cleanup example against local processes
+        env:
+          DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
+          DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
         run: |
           ./target/release/duhem run verifications/flow-cleanup-example \
             --db .duhem/duhem.db
 
       - name: Run step-groups example (local processes)
-        run: |
-          ./target/release/duhem run verifications/step-groups-example \
-            --db .duhem/duhem.db
-
-      # Hub replication (#194's ship contract; hub per
-      # onsager-ai/duhem-hub#6). `if: always()` ships red runs too —
-      # failure evidence is the point — and never gates the verdict.
-      # Clean no-op when the secrets aren't configured.
-      - name: Ship run bundle to hub (opt-in)
-        if: always()
-        continue-on-error: true
         env:
           DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
           DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
         run: |
-          RUN_ID=$(python3 -c "import sqlite3; print(sqlite3.connect('.duhem/duhem.db').execute('SELECT run_id FROM runs ORDER BY started_at DESC LIMIT 1').fetchone()[0])" 2>/dev/null || true)
-          if [ -n "$RUN_ID" ]; then
-            ./target/release/duhem ship "$RUN_ID" --db .duhem/duhem.db --if-configured
-          else
-            echo "no run recorded; nothing to ship"
-          fi
+          ./target/release/duhem run verifications/step-groups-example \
+            --db .duhem/duhem.db
 
   dashboard-regression:
     name: dashboard regression
@@ -240,22 +241,16 @@ jobs:
       # `duhem-dashboard`). A non-pass verdict exits non-zero.
       - name: Run duhem-dashboard regression VD
         env:
+          DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
+          DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
           DUHEM_BIN: ${{ github.workspace }}/target/release/duhem
         run: |
           ./target/release/duhem run verifications/duhem-dashboard \
             --db .duhem/duhem.db
 
-      # Hub replication — same contract as the duhem-cli job above.
-      - name: Ship run bundle to hub (opt-in)
-        if: always()
-        continue-on-error: true
-        env:
-          DUHEM_HUB_URL: ${{ secrets.DUHEM_HUB_URL }}
-          DUHEM_HUB_TOKEN: ${{ secrets.DUHEM_HUB_TOKEN }}
+      - name: Run automatic dashboard delivery example
         run: |
-          RUN_ID=$(python3 -c "import sqlite3; print(sqlite3.connect('.duhem/duhem.db').execute('SELECT run_id FROM runs ORDER BY started_at DESC LIMIT 1').fetchone()[0])" 2>/dev/null || true)
-          if [ -n "$RUN_ID" ]; then
-            ./target/release/duhem ship "$RUN_ID" --db .duhem/duhem.db --if-configured
-          else
-            echo "no run recorded; nothing to ship"
-          fi
+          ./target/release/duhem run verifications/ingest-example --db .duhem/duhem.db \
+            --inputs duhem_bin="$PWD/target/release/duhem" \
+            --inputs dashboard_bin="$PWD/target/release/duhem-dashboard" \
+            --inputs work_dir="${RUNNER_TEMP}/duhem-ingest-example"

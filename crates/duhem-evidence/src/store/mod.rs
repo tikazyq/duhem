@@ -1,8 +1,8 @@
 //! The `Store` trait — the single-source-of-truth seam (#189).
 //!
 //! Runs live in a database, not in per-run JSONL files. The runtime
-//! (which owns the judge's verdicts) is the **sole writer**; the
-//! dashboard opens a **read-only handle** and can never mutate. The
+//! writes local events and their projections. Opt-in bundle ingest reuses
+//! those projections after validation and replay. The
 //! trait is the open-core boundary from #188: `SqliteStore` (local,
 //! this crate) and a future hosted `PostgresStore` implement the same
 //! surface.
@@ -19,7 +19,7 @@ mod location;
 mod sqlite;
 
 pub use location::{dashboard_addr_path, project_db_path, project_slug, state_root};
-pub use sqlite::SqliteStore;
+pub use sqlite::{IngestError, SqliteStore};
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

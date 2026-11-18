@@ -1,0 +1,13 @@
+verification: Producer evidence for dashboard delivery
+criteria:
+  - id: PRODUCER
+    description: The local command exits successfully.
+    checks:
+      - id: exit
+        steps:
+          - id: show
+            uses: cli/invoke
+            with: {command: [printf, delivered]}
+        assertions:
+          - $steps.show.outputs.stdout == "delivered"
+          - $steps.show.outputs.exit_code == 0

@@ -105,7 +105,7 @@ dashboard action="help" *args:
             (cd crates/duhem-dashboard/web && npm ci && npm test && npm run build)
             cargo test -p duhem-dashboard
             cargo build -p duhem-dashboard -p duhem-cli
-            exec cargo test -p duhem-cli --test dashboard_cmd -- --ignored
+            exec cargo test -p duhem-cli --test dashboard_cmd --test dashboard_ingest -- --ignored
             ;;
         help|-h|--help)
             printf 'usage: just dashboard <dev|build|test> [dashboard options]\n'

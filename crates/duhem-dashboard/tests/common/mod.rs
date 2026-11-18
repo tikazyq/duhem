@@ -131,6 +131,7 @@ pub async fn write_passing_run(
     w.append(EventPayload::SetupFinished {
         phase: duhem_evidence::StepPhase::Setup,
         aborted: false,
+        abort_cause: None,
         fixture_name: None,
         check_id: None,
         criterion_id: None,
@@ -492,6 +493,7 @@ pub async fn write_aborted_run(store: Arc<SqliteStore>, run_id: &str, definition
     w.append(EventPayload::SetupFinished {
         phase: duhem_evidence::StepPhase::Setup,
         aborted: true,
+        abort_cause: None,
         fixture_name: None,
         check_id: None,
         criterion_id: None,

@@ -2,9 +2,8 @@
 //!
 //! The closed-source hub builds against this shape (#188 open-core
 //! seam), so the envelope is pinned here: an intentional change must
-//! update the golden below AND bump `BUNDLE_VERSION`, and the PR
-//! carries the cross-repo coordination. An accidental drift fails
-//! this test.
+//! preserve the golden for additive fields. Breaking changes bump
+//! `BUNDLE_VERSION` and require cross-repo coordination.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -32,6 +31,11 @@ fn fixed_bundle() -> RunBundle {
             verifier_sha: Some("deadbeef".into()),
             target_repo: Some("github.com/acme/app".into()),
             target_sha: Some("cafef00d".into()),
+            parent_run_id: None,
+            origin: None,
+            shard: None,
+            manifest_digest: None,
+            expected_partition: None,
         },
         events: vec![Event {
             session_source: None,
@@ -52,9 +56,7 @@ fn fixed_bundle() -> RunBundle {
     }
 }
 
-/// The golden envelope. If this assertion fails you changed the wire
-/// contract: bump `BUNDLE_VERSION`, update this golden, and
-/// coordinate the hub-side change (#188 sibling repo).
+/// The golden pins the byte representation when optional additions are absent.
 #[test]
 fn wire_envelope_shape_is_pinned() {
     let wire = String::from_utf8(fixed_bundle().wire_bytes().unwrap()).unwrap();
@@ -79,6 +81,36 @@ fn content_hash_is_deterministic_and_shape_sensitive() {
     let mut c = fixed_bundle();
     c.run.target_sha = Some("other".into());
     assert_ne!(a.content_hash().unwrap(), c.content_hash().unwrap());
+}
+
+#[test]
+fn optional_distributed_headers_round_trip_in_v1() {
+    let mut bundle = fixed_bundle();
+    bundle.run.parent_run_id = Some("logical-parent".into());
+    bundle.run.origin = Some(duhem_evidence::RunOrigin::Shard);
+    bundle.run.shard = Some(duhem_summary::ShardIdentity {
+        index: 2,
+        total: 3,
+        source: "flag".into(),
+    });
+    bundle.run.manifest_digest = Some("a".repeat(64));
+    bundle.run.expected_partition = Some(duhem_summary::ExpectedPartition {
+        units: vec!["unit-2".into()],
+        total_units: 1,
+        excluded: Vec::new(),
+    });
+    let bytes = bundle.wire_bytes().unwrap();
+    let decoded: RunBundle = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(decoded.bundle_version, 1);
+    assert_eq!(decoded, bundle);
+    assert_eq!(
+        decoded.content_hash().unwrap(),
+        bundle.content_hash().unwrap()
+    );
+    assert_ne!(
+        decoded.content_hash().unwrap(),
+        fixed_bundle().content_hash().unwrap()
+    );
 }
 
 #[tokio::test]

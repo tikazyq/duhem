@@ -144,6 +144,7 @@ fn normalize(event: &Event) -> Option<LifecycleEvent<'_>> {
         EventPayload::SetupFinished {
             phase,
             aborted,
+            abort_cause: _,
             fixture_name,
             check_id,
             criterion_id,

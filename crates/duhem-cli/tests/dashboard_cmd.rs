@@ -48,6 +48,7 @@ fn serve_mode_forwards_flags_and_propagates_exit_code() {
             "8123",
             "--host",
             "0.0.0.0",
+            "--ingest",
         ])
         .status()
         .unwrap();
@@ -55,7 +56,9 @@ fn serve_mode_forwards_flags_and_propagates_exit_code() {
     let argv = std::fs::read_to_string(argv_log).unwrap();
     assert_eq!(
         argv.lines().collect::<Vec<_>>(),
-        vec!["--db", "ev.db", "--port", "8123", "--host", "0.0.0.0"]
+        vec![
+            "--db", "ev.db", "--ingest", "--port", "8123", "--host", "0.0.0.0"
+        ]
     );
 }
 

@@ -331,7 +331,9 @@ impl Engine {
             .await?;
 
         let execution = async {
-            let scope = self.declared_claim_scope(def);
+            let mut scope = self.declared_claim_scope(def);
+            scope.native_only_vacuous = self.native_only_vacuous_body;
+            scope.missing_required_input = missing_declared.is_some();
             let empty_shard =
                 scope
                     .distributed

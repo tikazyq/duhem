@@ -29,6 +29,8 @@ The pre-consolidation long-form history for v0.1.0–v0.1.8 is frozen in
 
 ## Unreleased
 
+- [additive] Deliver completed run trees automatically to an opt-in dashboard, with optional v1 bundle lineage and shard metadata. (#663)
+
 - [additive] `duhem run` detects CI shards, partitions selected criteria and native runs deterministically, and records shard identity, manifest digest and expected partition in evidence and summaries. (#650)
 
 - [additive] `duhem init` detects Cargo, npm/pnpm/yarn, pytest and Go tests and prints suggested native entries for review without changing scaffold files. (#649)

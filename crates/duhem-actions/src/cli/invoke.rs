@@ -220,6 +220,7 @@ where
     I: IntoIterator<Item = (String, String)>,
 {
     iter.into_iter()
+        .filter(|(k, _)| !matches!(k.as_str(), "DUHEM_HUB_TOKEN" | "DUHEM_HUB_URL"))
         .filter(|(k, _)| {
             matches!(k.as_str(), "PATH" | "HOME" | "TMPDIR" | "LANG")
                 || k.starts_with("LC_")

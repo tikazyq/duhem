@@ -4,8 +4,7 @@
 //!
 //! Every handler re-queries the evidence store on each request — the
 //! MVP's hot-reload posture. The server holds a read-only store
-//! handle, owns no mutable state, and never invokes the runtime or
-//! judge.
+//! handle for these routes. Ingest is mounted separately when enabled.
 
 use axum::Router;
 use axum::body::Body;

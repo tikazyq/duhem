@@ -16,8 +16,8 @@
 use std::collections::BTreeMap;
 
 use duhem_judge::{
-    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, RunVerdict, VerdictState,
-    aggregate_check, aggregate_criterion, aggregate_run,
+    AssertionOutcome, CheckOutcome, CheckVerdict, CriterionVerdict, InconclusiveCause, RunVerdict,
+    VerdictState, aggregate_check, aggregate_criterion, aggregate_run,
 };
 use thiserror::Error;
 
@@ -92,6 +92,8 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     let mut native_outcomes = Vec::new();
     let mut process_setup = crate::replay_process::ProcessSetup::default();
     let mut saw_run_started = false;
+    let mut precondition = None;
+    let mut vacuous = false;
 
     // A step owner is stronger than the additive check_finished fallback,
     // regardless of event order. Preserve the existing hard error for two
@@ -223,10 +225,37 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                     crate::StepOutcome::Error | crate::StepOutcome::Timeout
                 ) || judgment.is_some_and(|state| state != VerdictState::Pass);
             }
+            EventPayload::ClaimScopeDeclared { scope } => {
+                vacuous = scope.native_only_vacuous
+                    || (scope.criteria.selected == 0
+                        && scope
+                            .distributed
+                            .expected_partition
+                            .as_ref()
+                            .is_some_and(|partition| partition.total_units > 0));
+                if scope.missing_required_input {
+                    precondition = Some(InconclusiveCause::EnvironmentError);
+                }
+            }
+            EventPayload::EnvUpFinished { exit_code, .. } if *exit_code != 0 => {
+                precondition = Some(InconclusiveCause::EnvironmentError);
+            }
+            EventPayload::EnvReady { ok: false, .. } => {
+                precondition = Some(InconclusiveCause::Timeout);
+            }
+            EventPayload::SetupFinished {
+                phase: crate::StepPhase::Setup,
+                criterion_id: None,
+                check_id: None,
+                fixture_name: None,
+                aborted: true,
+                abort_cause: Some(VerdictState::Inconclusive(cause)),
+            } => {
+                precondition = Some(*cause);
+            }
             EventPayload::StepObservation { .. }
             | EventPayload::ProcessObserved { .. }
             | EventPayload::RunHeartbeat
-            | EventPayload::ClaimScopeDeclared { .. }
             | EventPayload::RunAborted { .. }
             | EventPayload::StepFinished { .. }
             | EventPayload::SetupStarted { .. }
@@ -332,12 +361,12 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
 
     // Recompute the run verdict.
     let mut run = aggregate_run(recomputed_criteria);
-    if run.criteria.is_empty() && trace.events().iter().any(|event| matches!(
-        &event.payload,
-        EventPayload::ClaimScopeDeclared { scope } if scope.distributed.expected_partition.as_ref()
-            .is_some_and(|partition| partition.total_units > 0 && scope.criteria.selected == 0)
-    )) {
-        run.state = VerdictState::Pass;
+    if run.criteria.is_empty() {
+        if let Some(cause) = precondition {
+            run.state = VerdictState::Inconclusive(cause);
+        } else if vacuous {
+            run.state = VerdictState::Pass;
+        }
     }
     if let Some(recorded) = recorded_body
         && recorded != run.state

@@ -3,7 +3,7 @@
 Each CI machine runs the same `duhem run` with its own environment. Duhem
 partitions selected criteria and native runs locally; CI still starts the
 machines and gates their results. Each machine must have its own mutable test
-environment. Server aggregation and automatic upload are separate work.
+environment. Each machine can deliver its completed evidence to the same dashboard.
 
 ## Detection and overrides
 
@@ -91,4 +91,52 @@ on two machines with the same identity:
 ```sh
 duhem run verifications/sharding-example --shard 1/2 --run-id example-invocation --reporter json
 duhem run verifications/sharding-example --shard 2/2 --run-id example-invocation --reporter json
+```
+
+## Automatic delivery
+
+Start the OSS dashboard with ingest enabled and set `DUHEM_HUB_URL` on each
+producer to the full ingest URL.
+
+```sh
+duhem dashboard --ingest --db dashboard.db
+DUHEM_HUB_URL=http://127.0.0.1:7878/api/ingest \
+  duhem run verifications/sharding-example --shard 1/2 --run-id example-invocation
+```
+
+Loopback ingest can run without authentication. Set `DUHEM_HUB_TOKEN` on the
+dashboard and producers to require a bearer token. For a non-loopback bind the
+dashboard requires a non-empty token. Use HTTPS through a reverse proxy when
+sending evidence or tokens over a network. The token controls ingest only.
+Dashboard read endpoints remain public to anyone who can reach the server.
+Set the producer URL and token in the process environment before invoking Duhem.
+
+Ordinary and sharded invocations deliver after execution. An ordinary leaf is
+the root of its tree. A manifest has a suite root and leaf children. A shard
+sends the shared logical parent first and then its own leaf or suite subtree.
+Nested `duhem run` invocations invoked as steps share their enclosing store and
+are sent by the outermost invocation.
+
+Each bundle gets one request with a 10-second timeout. The complete delivery
+has a 30-second budget. A failed upload skips that run’s descendants. Duhem
+prints one warning if delivery fails or the budget expires.
+Local evidence, verdicts and exit codes are independent of delivery. The OSS
+dashboard accepts up to 16 MiB per bundle and treats identical resends as no-ops.
+`duhem ship` can manually deliver an individual bundle, parent first if needed.
+See the [run-bundle contract](run-bundle-contract.md) for the wire format.
+
+The logical parent stays unjudged. Combining shard verdicts, checking for missing
+or conflicting shards, and surfacing an aggregate verdict are later work. CI
+still gates on its individual shard jobs.
+
+The [worked verification](../verifications/ingest-example/duhem.yml) starts a
+real dashboard and queries an automatically delivered run. Run it from the
+repository root with both binaries built, a fresh scratch path and port 18787
+available.
+
+```sh
+duhem run verifications/ingest-example \
+  --inputs duhem_bin="$PWD/target/debug/duhem" \
+  --inputs dashboard_bin="$PWD/target/debug/duhem-dashboard" \
+  --inputs work_dir="$(mktemp -d)"
 ```

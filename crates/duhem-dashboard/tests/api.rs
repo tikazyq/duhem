@@ -309,6 +309,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
         .append(EventPayload::SetupFinished {
             phase: duhem_evidence::StepPhase::Setup,
             aborted: false,
+            abort_cause: None,
             fixture_name: None,
             check_id: None,
             criterion_id: Some("AC-1".into()),
@@ -331,6 +332,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
         .append(EventPayload::SetupFinished {
             phase: duhem_evidence::StepPhase::Setup,
             aborted: false,
+            abort_cause: None,
             fixture_name: None,
             check_id: Some("AC-1.1".into()),
             criterion_id: Some("AC-1".into()),
@@ -353,6 +355,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
         .append(EventPayload::SetupFinished {
             phase: duhem_evidence::StepPhase::Teardown,
             aborted: false,
+            abort_cause: None,
             fixture_name: Some("db".into()),
             check_id: Some("AC-1.1".into()),
             criterion_id: None,
@@ -415,6 +418,7 @@ async fn lifecycle_blocks_follow_the_enclosing_scope_chain() {
         .append(EventPayload::SetupFinished {
             phase: duhem_evidence::StepPhase::Setup,
             aborted: false,
+            abort_cause: None,
             fixture_name: Some("AC-2.1".into()),
             check_id: Some("AC-1.1".into()),
             criterion_id: None,
@@ -500,6 +504,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
         .append(EventPayload::SetupFinished {
             phase: duhem_evidence::StepPhase::Teardown,
             aborted: true,
+            abort_cause: None,
             fixture_name: None,
             check_id: None,
             criterion_id: None,
@@ -588,6 +593,7 @@ async fn leaf_setup_abort_is_not_overwritten_by_scoped_setup_completion() {
         .append(EventPayload::SetupFinished {
             phase: duhem_evidence::StepPhase::Setup,
             aborted: true,
+            abort_cause: None,
             fixture_name: None,
             check_id: None,
             criterion_id: None,
@@ -598,6 +604,7 @@ async fn leaf_setup_abort_is_not_overwritten_by_scoped_setup_completion() {
         .append(EventPayload::SetupFinished {
             phase: duhem_evidence::StepPhase::Setup,
             aborted: false,
+            abort_cause: None,
             fixture_name: None,
             check_id: None,
             criterion_id: Some("AC-1".into()),

@@ -14,6 +14,7 @@ mod browser_cmd;
 mod contract_check;
 mod coverage_cmd;
 mod dashboard;
+mod delivery;
 mod describe_cmd;
 mod env_file;
 mod export_cmd;
@@ -449,6 +450,7 @@ fn main() -> ExitCode {
             capture_video,
             viewport,
         }) => {
+            let delivery = delivery::Delivery::configured();
             if let Err(e) = env_file::source_for_run(
                 path.as_deref(),
                 file.as_deref(),
@@ -491,30 +493,33 @@ fn main() -> ExitCode {
                 .enable_all()
                 .build()
                 .expect("tokio runtime");
-            rt.block_on(run_cmd::run_command(run_cmd::RunArgs {
-                path,
-                file,
-                inputs,
-                filter,
-                db,
-                run_id,
-                shard,
-                reporter: resolved_reporter,
-                profile,
-                dry_run,
-                no_env_up,
-                keep_env,
-                // Tri-state: forced on / forced off / auto (TTY).
-                live: match (live, no_live) {
-                    (true, _) => Some(true),
-                    (_, true) => Some(false),
-                    _ => None,
+            rt.block_on(run_cmd::run_command(
+                run_cmd::RunArgs {
+                    path,
+                    file,
+                    inputs,
+                    filter,
+                    db,
+                    run_id,
+                    shard,
+                    reporter: resolved_reporter,
+                    profile,
+                    dry_run,
+                    no_env_up,
+                    keep_env,
+                    // Tri-state: forced on / forced off / auto (TTY).
+                    live: match (live, no_live) {
+                        (true, _) => Some(true),
+                        (_, true) => Some(false),
+                        _ => None,
+                    },
+                    watch,
+                    capture,
+                    capture_video,
+                    viewport,
                 },
-                watch,
-                capture,
-                capture_video,
-                viewport,
-            }))
+                delivery,
+            ))
         }
     }
 }

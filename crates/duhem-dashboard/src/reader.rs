@@ -665,6 +665,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
             EventPayload::SetupFinished {
                 phase,
                 aborted,
+                abort_cause: _,
                 fixture_name,
                 check_id,
                 criterion_id,

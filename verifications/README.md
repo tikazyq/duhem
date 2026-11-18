@@ -21,6 +21,10 @@ Two kinds of directory live here, for two kinds of reader:
 > ladder below in order. From the repo root, `duhem run
 > verifications/<dir>` runs any of them.
 
+The [automatic delivery example](ingest-example/duhem.yml) starts an ingest-enabled
+local dashboard and checks that a producer's evidence is queryable in its own
+store. See [Distributed runs](../docs/distributed-runs.md#automatic-delivery).
+
 The [native greeting example](native-example/) combines an exit-code run with
 output expectations, real Node tests producing JUnit, and an independent CLI
 criterion. The CLI suite drives required-failure, missing-report, and diagnostic

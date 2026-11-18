@@ -15,6 +15,8 @@ on:
     paths:
       - 'crates/duhem-dashboard/**'
       - 'crates/duhem-cli/src/dashboard.rs'
+      - 'crates/duhem-cli/src/delivery.rs'
+      - 'crates/duhem-cli/tests/dashboard_ingest.rs'
       - 'crates/duhem-cli/tests/dashboard_cmd.rs'
       - '.github/workflows/dashboard.yml'
   push:
@@ -22,6 +24,8 @@ on:
     paths:
       - 'crates/duhem-dashboard/**'
       - 'crates/duhem-cli/src/dashboard.rs'
+      - 'crates/duhem-cli/src/delivery.rs'
+      - 'crates/duhem-cli/tests/dashboard_ingest.rs'
       - 'crates/duhem-cli/tests/dashboard_cmd.rs'
       - '.github/workflows/dashboard.yml'
 
@@ -72,4 +76,4 @@ jobs:
       - name: duhem dashboard end-to-end
         run: |
           cargo build -p duhem-dashboard -p duhem-cli
-          cargo test -p duhem-cli --test dashboard_cmd -- --ignored
+          cargo test -p duhem-cli --test dashboard_cmd --test dashboard_ingest -- --ignored

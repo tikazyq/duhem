@@ -52,6 +52,10 @@ pub struct ClaimScope {
     pub distributed: crate::DistributedRun,
     pub criteria: ClaimCounts,
     pub checks: ClaimCounts,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub native_only_vacuous: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub missing_required_input: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filters: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
