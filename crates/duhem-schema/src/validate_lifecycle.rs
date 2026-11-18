@@ -230,11 +230,20 @@ fn validate_fixture_value_exprs(
         StepCondition::Expr(expr) => Some(expr),
         _ => None,
     };
-    for (key, label, expr) in [
-        ("if", "condition", condition),
-        ("for_each", "for_each source", step.for_each.as_ref()),
-    ] {
-        let Some(expr) = expr else { continue };
+    let group_conditions = step.groups.iter().filter_map(|group| {
+        let StepCondition::Expr(expr) = &group.condition else {
+            return None;
+        };
+        Some(("if", "group condition", expr, group.location))
+    });
+    for (key, label, expr, location) in group_conditions.chain(
+        [
+            ("if", "condition", condition),
+            ("for_each", "for_each source", step.for_each.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(key, label, expr)| Some((key, label, expr?, None))),
+    ) {
         let path = [
             SourcePathSegment::key("fixtures"),
             SourcePathSegment::key(name),
@@ -247,7 +256,7 @@ fn validate_fixture_value_exprs(
             &format!("fixture `{name}` {phase} step {label}"),
             &expr.raw,
             &expr.parsed,
-            v.source_map.scalar_location(&path, &expr.raw),
+            location.or_else(|| v.source_map.scalar_location(&path, &expr.raw)),
             preceding,
             None,
             Some(FixtureValueScope { name, up_outputs }),
@@ -294,23 +303,36 @@ pub(crate) fn validate_lifecycle_condition_in_loop(
     active_loop: Option<&str>,
     errs: &mut Vec<ValidationError>,
 ) {
-    let StepCondition::Expr(expr) = &step.condition else {
-        return;
-    };
-    let location = definition
-        .source_map
-        .scalar_location(source_path, &expr.raw);
-    validate_lifecycle_value_expr(
-        definition,
-        &format!("{phase} step condition"),
-        &expr.raw,
-        &expr.parsed,
-        location,
-        preceding,
-        active_loop,
-        None,
-        errs,
-    );
+    for (condition, group) in step
+        .groups
+        .iter()
+        .map(|group| (&group.condition, Some(group)))
+        .chain(std::iter::once((&step.condition, None)))
+    {
+        let StepCondition::Expr(expr) = condition else {
+            continue;
+        };
+        let location = group.and_then(|group| group.location).or_else(|| {
+            definition
+                .source_map
+                .scalar_location(source_path, &expr.raw)
+        });
+        let site = match group.filter(|group| !group.label.is_empty()) {
+            Some(group) => format!("{phase} group `{}` condition", group.label),
+            None => format!("{phase} step condition"),
+        };
+        validate_lifecycle_value_expr(
+            definition,
+            &site,
+            &expr.raw,
+            &expr.parsed,
+            location,
+            preceding,
+            active_loop,
+            None,
+            errs,
+        );
+    }
 }
 
 /// Validate a `for_each:` step's source expression with the exact

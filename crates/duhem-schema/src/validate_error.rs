@@ -43,6 +43,12 @@ pub enum ValidationError {
     #[error("verification has no criteria")]
     NoCriteria,
 
+    #[error("{message}")]
+    InvalidGroup {
+        message: String,
+        location: Option<SourceLocation>,
+    },
+
     #[error("{site} `{raw}` is not a valid expression: {context}")]
     InvalidWithExpression {
         raw: String,
@@ -452,6 +458,7 @@ impl ValidationError {
     /// Exact source position of the offending scalar, when proven.
     pub fn location(&self) -> Option<SourceLocation> {
         match self {
+            Self::InvalidGroup { location, .. } => *location,
             Self::InvalidWithExpression { location, .. }
             | Self::UnresolvedStepRef { location, .. }
             | Self::UnresolvedStepOutput { location, .. }

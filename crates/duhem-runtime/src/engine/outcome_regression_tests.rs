@@ -14,6 +14,7 @@ fn evidence(outcome: Outcome, with: &str) -> StepEvidence {
         with: serde_yml::from_str(with).unwrap(),
         outputs: BTreeMap::new(),
         skip_reason: None,
+        value_gated: false,
         catalog_reference: None,
         outcome: Some(outcome),
         detail: None,
@@ -31,7 +32,7 @@ fn timed_out_actuator_between_judgments_poison_sequence_and_names_step() {
             ..evidence(Outcome::Ok, "{}")
         },
         evidence(Outcome::Timeout, "{ timeout: 10s }"),
-        StepEvidence::skipped("gated after `send_message`".into()),
+        StepEvidence::skipped("gated after `send_message`".into(), false),
     ];
     let outcomes = implicit_judgment_outcomes(
         &check,
@@ -82,7 +83,7 @@ fn environment_failure_contributes_for_each_non_gated_actuator() {
     );
     let evidence = vec![
         evidence(Outcome::Error, "{}"),
-        StepEvidence::skipped("if condition did not match".into()),
+        StepEvidence::skipped("if condition did not match".into(), true),
         evidence(Outcome::Error, "{}"),
     ];
     let outcomes = implicit_judgment_outcomes(
@@ -106,7 +107,7 @@ fn gating_cleanup_and_manual_control_obey_execution_failure_rules() {
         "  - id: gated\n    uses: ui/click\n  - id: cleanup\n    uses: ui/click\n  - id: manual\n    uses: ui/assert-url\n    outputs: { satisfied: satisfied }\n",
     );
     let evidence = vec![
-        StepEvidence::skipped("if condition did not match".into()),
+        StepEvidence::skipped("if condition did not match".into(), true),
         evidence(Outcome::Error, "{}"),
         evidence(Outcome::Timeout, "{ timeout: 2s }"),
     ];

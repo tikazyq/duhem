@@ -1,8 +1,9 @@
 //! Closed step-gating policy shared by checks and setup.
 
 use duhem_actions::Outcome;
+use duhem_evidence::StepOutcome;
 use duhem_judge::VerdictState;
-use duhem_schema::StepCondition;
+use duhem_schema::{Step, StepCondition, StepGroup};
 
 pub(crate) fn skip_reason(condition: &StepCondition, failed_by: Option<&str>) -> Option<String> {
     match (condition, failed_by) {
@@ -10,13 +11,20 @@ pub(crate) fn skip_reason(condition: &StepCondition, failed_by: Option<&str>) ->
         // gate: omitting `if:` means `success`, so replacing it with an
         // expression must not silently forfeit that protection. The
         // expression is evaluated only once this gate passes.
-        (StepCondition::Success | StepCondition::Expr(_), Some(step)) => {
-            Some(format!("blocked by failed step `{step}`"))
-        }
+        (
+            StepCondition::Success | StepCondition::ExplicitSuccess | StepCondition::Expr(_),
+            Some(step),
+        ) => Some(format!("blocked by failed step `{step}`")),
         (StepCondition::Failure, None) => {
             Some("`if: failure` requires an earlier failed step".to_string())
         }
-        (StepCondition::Success | StepCondition::Always | StepCondition::Expr(_), None)
+        (
+            StepCondition::Success
+            | StepCondition::ExplicitSuccess
+            | StepCondition::Always
+            | StepCondition::Expr(_),
+            None,
+        )
         | (StepCondition::Always | StepCondition::Failure, Some(_)) => None,
     }
 }
@@ -35,7 +43,7 @@ pub(super) fn evaluate(
     failed_by: Option<&str>,
     ctx: &dyn crate::EvalContext,
 ) -> Result<Option<duhem_evidence::StepOutcome>, super::EngineError> {
-    gate(step, failed_by, ctx).map_err(|cause| super::EngineError::UnresolvedReference {
+    gate(&step.condition, failed_by, ctx).map_err(|cause| super::EngineError::UnresolvedReference {
         reference: condition_source(step),
         context: format!(" (condition could not be evaluated: {cause:?})"),
         step: super::outcome::step_label(step, index),
@@ -52,7 +60,7 @@ pub(super) fn evaluate_in_check(
     failed_by: Option<&str>,
     ctx: &dyn crate::EvalContext,
 ) -> Result<Option<duhem_evidence::StepOutcome>, String> {
-    gate(step, failed_by, ctx).map_err(|cause| {
+    gate(&step.condition, failed_by, ctx).map_err(|cause| {
         format!(
             "step `{}`: condition `{}` could not be resolved: {}",
             super::outcome::step_label(step, index),
@@ -70,19 +78,18 @@ fn condition_source(step: &duhem_schema::Step) -> String {
 }
 
 fn gate(
-    step: &duhem_schema::Step,
+    condition: &StepCondition,
     failed_by: Option<&str>,
     ctx: &dyn crate::EvalContext,
 ) -> Result<Option<duhem_evidence::StepOutcome>, crate::InconclusiveCause> {
-    use duhem_evidence::StepOutcome;
-    if let Some(reason) = skip_reason(&step.condition, failed_by) {
+    if let Some(reason) = skip_reason(condition, failed_by) {
         return Ok(Some(StepOutcome::Skipped {
             reason,
             condition: None,
             operands: None,
         }));
     }
-    let StepCondition::Expr(expr) = &step.condition else {
+    let StepCondition::Expr(expr) = condition else {
         return Ok(None);
     };
     let (result, operands) = crate::eval::operands::evaluate(expr, ctx);
@@ -95,4 +102,81 @@ fn gate(
         })),
         crate::EvalResult::Inconclusive(cause) => Err(cause),
     }
+}
+
+/// Conditions are evaluated when entering a group, then reused until the
+/// sequence leaves it. Each loop iteration starts with its own cursor.
+#[derive(Clone, Default)]
+pub(super) struct GroupGates {
+    active: Vec<(StepGroup, Option<StepOutcome>)>,
+}
+
+impl GroupGates {
+    pub(super) fn enter(
+        &mut self,
+        step: &Step,
+        failed_by: Option<&str>,
+        ctx: &dyn crate::EvalContext,
+    ) -> Result<Option<StepOutcome>, super::EngineError> {
+        let common = self
+            .active
+            .iter()
+            .zip(&step.groups)
+            .take_while(|((active, _), group)| active == *group)
+            .count();
+        self.active.truncate(common);
+        for group in &step.groups[common..] {
+            let outcome = if let Some((_, Some(blocked))) = self.active.last() {
+                Some(blocked.clone())
+            } else {
+                match gate(&group.condition, failed_by, ctx) {
+                    Ok(Some(StepOutcome::Skipped {
+                        reason,
+                        condition,
+                        operands,
+                    })) => Some(StepOutcome::Skipped {
+                        reason: if group.label.is_empty() {
+                            reason
+                        } else {
+                            format!("group `{}`: {reason}", group.label)
+                        },
+                        condition,
+                        operands,
+                    }),
+                    Ok(outcome) => outcome,
+                    Err(cause) => {
+                        let step = format!("group `{}`", group.label);
+                        self.active.push((
+                            group.clone(),
+                            Some(StepOutcome::Skipped {
+                                reason: format!("{step}: condition could not be evaluated"),
+                                condition: None,
+                                operands: None,
+                            }),
+                        ));
+                        let StepCondition::Expr(expr) = &group.condition else {
+                            unreachable!()
+                        };
+                        return Err(super::EngineError::UnresolvedReference {
+                            reference: expr.raw.clone(),
+                            context: format!(" (condition could not be evaluated: {cause:?})"),
+                            step,
+                        });
+                    }
+                }
+            };
+            self.active.push((group.clone(), outcome));
+        }
+        Ok(self.active.last().and_then(|(_, outcome)| outcome.clone()))
+    }
+}
+
+pub(super) fn group_path(step: &Step) -> Option<Vec<String>> {
+    let labels: Vec<_> = step
+        .groups
+        .iter()
+        .filter(|group| !group.label.is_empty())
+        .map(|group| group.label.clone())
+        .collect();
+    (!labels.is_empty()).then_some(labels)
 }

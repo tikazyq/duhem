@@ -344,20 +344,6 @@ mod tests {
             )),
             "{e:?}"
         );
-
-        let nested_steps = "verification: x\nsetup:\n  - for_each: $inputs.rows\n    max: 5\n    as: row\n    steps:\n      - steps: [{ uses: cli/invoke }]\n        uses: cli/invoke\ncriteria:\n  - id: AC-1\n    description: x\n    checks:\n      - id: AC-1.1\n        assertions: [\"true\"]\n";
-        let e = errs(nested_steps);
-        assert!(
-            e.iter().any(|e| matches!(
-                e,
-                ValidationError::ForEachDepthExceeded {
-                    field: "steps",
-                    location: Some(_),
-                    ..
-                }
-            )),
-            "{e:?}"
-        );
     }
 
     #[test]

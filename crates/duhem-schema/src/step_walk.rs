@@ -10,6 +10,7 @@ pub struct StepBlock<'a> {
     pub site: String,
     pub check: Option<&'a Check>,
     pub(crate) path: Vec<Segment>,
+    pub(crate) group_body: bool,
 }
 
 impl StepBlock<'_> {
@@ -60,6 +61,7 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
             phase.into(),
             vec![Segment::key(phase)],
             None,
+            false,
             &mut blocks,
         );
     }
@@ -74,6 +76,7 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
                     Segment::key(phase),
                 ],
                 None,
+                false,
                 &mut blocks,
             );
         }
@@ -92,6 +95,7 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
                     Segment::key(field),
                 ],
                 None,
+                false,
                 &mut blocks,
             );
         }
@@ -105,7 +109,14 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
         ] {
             let mut path = path.clone();
             path.push(Segment::key(phase));
-            collect(steps, format!("{label} {phase}"), path, None, &mut blocks);
+            collect(
+                steps,
+                format!("{label} {phase}"),
+                path,
+                None,
+                false,
+                &mut blocks,
+            );
         }
         for (hi, check) in criterion.checks.iter().enumerate() {
             let label = format!("{label} / check `{}`", check.id);
@@ -126,7 +137,7 @@ pub fn step_blocks(definition: &VerificationDefinition) -> Vec<StepBlock<'_>> {
                 } else {
                     format!("{label} {phase}")
                 };
-                collect(steps, site, path, body.then_some(check), &mut blocks);
+                collect(steps, site, path, body.then_some(check), false, &mut blocks);
             }
         }
     }
@@ -138,6 +149,7 @@ fn collect<'a>(
     site: String,
     path: Vec<Segment>,
     check: Option<&'a Check>,
+    group_body: bool,
     blocks: &mut Vec<StepBlock<'a>>,
 ) {
     for (index, step) in steps.iter().enumerate() {
@@ -149,7 +161,14 @@ fn collect<'a>(
         if !nested.is_empty() {
             let mut nested_path = path.clone();
             nested_path.extend([Segment::index(index), Segment::key("steps")]);
-            collect(nested, site.clone(), nested_path, check, blocks);
+            collect(
+                nested,
+                site.clone(),
+                nested_path,
+                check,
+                step.for_each.is_none(),
+                blocks,
+            );
         }
     }
     blocks.push(StepBlock {
@@ -157,6 +176,7 @@ fn collect<'a>(
         site,
         check,
         path,
+        group_body,
     });
 }
 

@@ -46,6 +46,21 @@ pub fn validate_with_contract_outputs(
     v: &VerificationDefinition,
     outputs_for: &dyn Fn(&str) -> Vec<String>,
 ) -> Result<(), Vec<ValidationError>> {
+    let groups = crate::groups::validate(v);
+    if !groups.is_empty() {
+        return Err(groups);
+    }
+    let mut normalized;
+    let v = if crate::step_walk::step_blocks(v)
+        .iter()
+        .any(|block| crate::groups::has_group(block.steps))
+    {
+        normalized = v.clone();
+        crate::groups::flatten(&mut normalized);
+        &normalized
+    } else {
+        v
+    };
     let mut errs = Vec::new();
     crate::validate_sessions::validate(v, outputs_for, &mut errs);
     crate::validate_process::validate(v, &mut errs);

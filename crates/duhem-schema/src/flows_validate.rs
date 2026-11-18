@@ -312,6 +312,14 @@ fn validate_flow(name: &str, flow: &Flow, catalog: &FlowCatalog, errors: &mut Ve
             errors.push(format!("flow `{name}` has duplicate step id `{id}`"));
         }
         let mut references = vec![step.with.clone()];
+        references.extend(
+            step.groups
+                .iter()
+                .filter_map(|group| match &group.condition {
+                    StepCondition::Expr(expr) => Some(serde_yml::Value::String(expr.raw.clone())),
+                    _ => None,
+                }),
+        );
         if let Some(expr) = &step.for_each {
             references.push(serde_yml::Value::String(expr.raw.clone()));
         }
@@ -424,6 +432,14 @@ fn validate_flow_cleanup(name: &str, flow: &Flow, catalog: &FlowCatalog, errors:
             }
         }
         let mut references = vec![step.with.clone()];
+        references.extend(
+            step.groups
+                .iter()
+                .filter_map(|group| match &group.condition {
+                    StepCondition::Expr(expr) => Some(serde_yml::Value::String(expr.raw.clone())),
+                    _ => None,
+                }),
+        );
         if let StepCondition::Expr(condition) = &step.condition {
             references.push(serde_yml::Value::String(condition.raw.clone()));
         }

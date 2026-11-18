@@ -18,6 +18,7 @@ impl Engine {
         cleanup_steps: &mut BTreeSet<usize>,
         step_evidence: &mut [StepEvidence],
         gated_judging_steps: &mut u32,
+        groups: &mut GroupGates,
     ) -> Result<(), EngineError> {
         for idx in indices {
             let step = &check.steps[idx];
@@ -29,11 +30,14 @@ impl Engine {
                 .or_default();
             // An unresolvable condition makes this check inconclusive
             // rather than aborting the run (#440 R2); see below.
-            let (gate, unresolved_condition) =
-                match evaluate_in_check(step, idx, failed_by.as_deref(), ctx) {
+            let (gate, unresolved_condition) = match groups.enter(step, failed_by.as_deref(), ctx) {
+                Ok(Some(gate)) => (Some(gate), None),
+                Ok(None) => match evaluate_in_check(step, idx, failed_by.as_deref(), ctx) {
                     Ok(gate) => (gate, None),
                     Err(detail) => (None, Some(detail)),
-                };
+                },
+                Err(error) => (None, Some(error.to_string())),
+            };
             let cleanup_step = failed_by.is_some() && gate.is_none();
             if cleanup_step {
                 cleanup_steps.insert(idx);
@@ -119,7 +123,7 @@ impl Engine {
 
             // A dispatched call to a flow with `cleanup:` registers it on this
             // check attempt (#615); one gated off by `if:` registers nothing.
-            if gate.is_none() {
+            if gate.is_none() && unresolved_condition.is_none() {
                 ctx.run_state().register_flow_cleanups(
                     step,
                     &crate::engine::flow_cleanup::RegisteredAt::Check(
@@ -137,6 +141,7 @@ impl Engine {
                     check_id: check.id.clone(),
                     step_index: idx as u32,
                     uses: step.uses_name().to_string(),
+                    group_path: group_path(step),
                     // Layer comes only from the executed action's catalog (#192).
                     layer: duhem_actions::layer_for_uses(step.uses_name()).map(str::to_string),
                     with: with_to_evidence_map(&resolved_with),
@@ -156,7 +161,8 @@ impl Engine {
                 operands,
             }) = gate
             {
-                if condition.is_some()
+                let value_gated = condition.is_some();
+                if value_gated
                     && self
                         .registry
                         .get(step.uses_name())
@@ -175,7 +181,7 @@ impl Engine {
                         detail: None,
                     })
                     .await?;
-                step_evidence[idx] = StepEvidence::skipped(reason);
+                step_evidence[idx] = StepEvidence::skipped(reason, value_gated);
                 continue;
             }
 
@@ -195,6 +201,7 @@ impl Engine {
                     with: resolved_with.clone(),
                     outputs: BTreeMap::new(),
                     skip_reason: None,
+                    value_gated: false,
                     catalog_reference: catalog_reference.clone(),
                     outcome: Some(Outcome::Error),
                     detail: Some(detail),
@@ -311,6 +318,7 @@ impl Engine {
                         with: resolved_with.clone(),
                         outputs: r.outputs.clone(),
                         skip_reason: None,
+                        value_gated: false,
                         catalog_reference: catalog_reference.clone(),
                         outcome: Some(r.outcome.clone()),
                         detail: None,

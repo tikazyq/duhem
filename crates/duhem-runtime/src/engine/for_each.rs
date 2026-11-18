@@ -17,7 +17,7 @@ use duhem_evidence::{EventPayload, EvidenceWriter, StepOutcome, StepPhase};
 use duhem_schema::Step;
 
 use crate::engine::context::RunState;
-use crate::engine::gating::{evaluate as evaluate_gate, step_failed};
+use crate::engine::gating::{GroupGates, evaluate as evaluate_gate, group_path, step_failed};
 use crate::engine::registry::{ActionRegistry, Dispatch};
 use crate::engine::runner::{
     CleanupFailure, EngineError, StepEvidence, display_step_label, implicit_judgment_for_step,
@@ -58,7 +58,7 @@ fn loop_run_context<'r>(
 /// makes `$<as>` resolve against the current element while tagging
 /// this step's evidence with its iteration.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn process_lifecycle_step(
+pub(super) async fn process_lifecycle_step(
     writer: &mut EvidenceWriter,
     registry: &ActionRegistry,
     setup_browser: Option<&CheckBrowser>,
@@ -75,6 +75,7 @@ pub(crate) async fn process_lifecycle_step(
     failed_by: &mut Option<String>,
     stored_error: &mut Option<EngineError>,
     cleanup: &mut Vec<CleanupFailure>,
+    groups: &mut GroupGates,
 ) -> Result<(), EngineError> {
     let (fixture_name, check_id, criterion_id) = scope.evidence_fields();
     writer.set_session(step.session.as_deref());
@@ -89,13 +90,23 @@ pub(crate) async fn process_lifecycle_step(
     // `condition`/`operands` the same way any other gated step does
     // (#511's shrunken-claim-set reporting depends on this).
     let ctx = loop_run_context(run, loop_ctx);
-    let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), &ctx) {
-        Ok(gate) => (gate, None),
-        Err(error) => (None, Some(error)),
-    };
+    let (gate, condition_error) =
+        match groups
+            .enter(step, failed_by.as_deref(), &ctx)
+            .and_then(|group| {
+                if group.is_some() {
+                    Ok(group)
+                } else {
+                    evaluate_gate(step, idx, failed_by.as_deref(), &ctx)
+                }
+            }) {
+            Ok(gate) => (gate, None),
+            Err(error) => (None, Some(error)),
+        };
     // A dispatched call to a flow with `cleanup:` registers it on this scope
     // (#615); one gated off by `if:` registers nothing.
     if gate.is_none()
+        && condition_error.is_none()
         && phase == StepPhase::Setup
         && let Some(at) = scope.registration_site()
     {
@@ -283,7 +294,7 @@ pub(crate) async fn process_lifecycle_step(
 /// `if: always`/`if: failure` gating applies unchanged across
 /// iterations. An empty array is zero iterations, not an error (R7).
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_for_each_step(
+pub(super) async fn run_for_each_step(
     writer: &mut EvidenceWriter,
     registry: &ActionRegistry,
     setup_browser: Option<&CheckBrowser>,
@@ -299,6 +310,7 @@ pub(crate) async fn run_for_each_step(
     failed_by: &mut Option<String>,
     stored_error: &mut Option<EngineError>,
     cleanup: &mut Vec<CleanupFailure>,
+    groups: &mut GroupGates,
 ) -> Result<(), EngineError> {
     let (fixture_name, check_id, criterion_id) = scope.evidence_fields();
     let expr = step
@@ -321,10 +333,47 @@ pub(crate) async fn run_for_each_step(
     // every other step gate goes through (see `process_lifecycle_step`),
     // not a second hand-rolled evaluation.
     let gate_ctx = crate::engine::context::RunContext::new(run);
-    let (gate, condition_error) = match evaluate_gate(step, idx, failed_by.as_deref(), &gate_ctx) {
-        Ok(gate) => (gate, None),
-        Err(error) => (None, Some(error)),
-    };
+    let group_gate = groups.enter(step, failed_by.as_deref(), &gate_ctx);
+    let body: Vec<_> = step
+        .for_each_body
+        .iter()
+        .cloned()
+        .map(|mut child| {
+            child.groups.splice(..0, step.groups.iter().cloned());
+            child
+        })
+        .collect();
+    if matches!(group_gate, Ok(Some(_))) {
+        let mut groups = groups.clone();
+        for child in &body {
+            process_lifecycle_step(
+                writer,
+                registry,
+                setup_browser,
+                run,
+                child_env,
+                phase,
+                scope,
+                environment_failed,
+                child,
+                idx,
+                None,
+                contexts,
+                aborted,
+                failed_by,
+                stored_error,
+                cleanup,
+                &mut groups,
+            )
+            .await?;
+        }
+        return Ok(());
+    }
+    let (gate, condition_error) =
+        match group_gate.and_then(|_| evaluate_gate(step, idx, failed_by.as_deref(), &gate_ctx)) {
+            Ok(gate) => (gate, None),
+            Err(error) => (None, Some(error)),
+        };
     let cleanup_step = phase == StepPhase::Teardown || failed_by.is_some();
 
     writer
@@ -332,6 +381,7 @@ pub(crate) async fn run_for_each_step(
             phase,
             step_index: idx as u32,
             uses: uses_label,
+            group_path: group_path(step),
             layer: None,
             with: BTreeMap::new(),
             fixture_name: fixture_name.clone(),
@@ -526,7 +576,8 @@ pub(crate) async fn run_for_each_step(
             element,
             iteration: iteration as u32,
         };
-        for body_step in &step.for_each_body {
+        let mut iteration_groups = groups.clone();
+        for body_step in &body {
             process_lifecycle_step(
                 writer,
                 registry,
@@ -544,6 +595,7 @@ pub(crate) async fn run_for_each_step(
                 failed_by,
                 stored_error,
                 cleanup,
+                &mut iteration_groups,
             )
             .await?;
         }
@@ -583,6 +635,7 @@ async fn append_setup_started(
             phase,
             step_index: idx as u32,
             uses: step.uses_name().to_string(),
+            group_path: group_path(step),
             // Same honesty contract as the per-check tag (#192).
             layer: duhem_actions::layer_for_uses(step.uses_name()).map(str::to_string),
             with: with_to_evidence_map(resolved_with),
@@ -737,6 +790,7 @@ async fn invoke_and_record(
             Outcome::Skipped { reason } => Some(reason.clone()),
             _ => None,
         },
+        value_gated: false,
         catalog_reference: None,
         outcome: Some(outcome.clone()),
         detail: action_detail

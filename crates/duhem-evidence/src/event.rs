@@ -313,6 +313,9 @@ pub enum EventPayload {
         phase: StepPhase,
         step_index: u32,
         uses: String,
+        /// Inline group labels, from the outermost group to the innermost.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group_path: Option<Vec<String>>,
         /// Delivery-web layer the executed action exercised (#192):
         /// `ui` / `api` / `data` / `runtime`. Stamped by the runtime
         /// from the action catalog family — never inferred. Absent
@@ -389,6 +392,9 @@ pub enum EventPayload {
         check_id: String,
         step_index: u32,
         uses: String,
+        /// Inline group labels, from the outermost group to the innermost.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group_path: Option<Vec<String>>,
         /// Delivery-web layer the executed action exercised (#192).
         /// Same contract as `SetupStepStarted.layer`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -766,6 +772,7 @@ mod tests {
             EventPayload::SetupStepStarted {
                 phase: StepPhase::Setup,
                 step_index: 0,
+                group_path: None,
                 uses: "ui/navigate".into(),
                 layer: None,
                 with: BTreeMap::new(),
@@ -1007,6 +1014,7 @@ mod tests {
             criterion_id: "AC-1".into(),
             check_id: "AC-1.1".into(),
             step_index: 0,
+            group_path: None,
             uses: "ui/click".into(),
             layer: Some("ui".into()),
             with: BTreeMap::new(),

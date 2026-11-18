@@ -143,7 +143,12 @@ fn validate_step(
     errors: &mut Vec<ValidationError>,
 ) {
     if step.for_each.is_some() {
-        for (index, inner) in step.for_each_body.iter().enumerate() {
+        let body = if step.for_each_body.is_empty() {
+            step.steps.as_deref().unwrap_or_default()
+        } else {
+            &step.for_each_body
+        };
+        for (index, inner) in body.iter().enumerate() {
             let mut inner_path = path.clone();
             inner_path.extend([S::key("steps"), S::index(index)]);
             validate_step(v, inner, check, inner_path, site, errors);

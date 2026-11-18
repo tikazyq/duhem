@@ -39,6 +39,7 @@ fn step_started(idx: u32, uses: &str) -> EventPayload {
         criterion_id: "AC-1".into(),
         check_id: "AC-1.1".into(),
         step_index: idx,
+        group_path: None,
         uses: uses.into(),
         layer: Some("ui".into()),
         flow: None,

@@ -20,6 +20,18 @@ pub(crate) const MAX_FLOW_DEPTH: usize = MAX_INCLUDE_DEPTH;
 
 /// Validate every flow-facing rule and expand all check invocations.
 pub(crate) fn validate_and_expand(definition: &mut VerificationDefinition) -> Result<(), String> {
+    let groups = crate::groups::validate(definition);
+    if !groups.is_empty() {
+        return Err(groups
+            .iter()
+            .map(|error| match error.location() {
+                Some(location) => format!("{}:{}: {error}", location.line, location.column),
+                None => error.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("; "));
+    }
+    crate::groups::flatten(definition);
     let errors = validate_authored(definition);
     if !errors.is_empty() {
         return Err(errors.join("; "));
@@ -208,17 +220,28 @@ fn for_each_body_steps(step: &Step) -> Option<Vec<Step>> {
         step.call.as_deref().filter(|c| !c.trim().is_empty()),
         step.steps.as_ref(),
     );
+    let condition = step
+        .groups
+        .iter()
+        .rev()
+        .find_map(|group| match &group.condition {
+            condition @ (StepCondition::Always | StepCondition::Failure) => Some(condition.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
     match forms {
         (Some(uses), None, None) => Some(vec![Step {
             uses: Some(uses.to_string()),
             with: step.with.clone(),
             session: step.session.clone(),
+            condition,
             ..blank_step()
         }]),
         (None, Some(call), None) => Some(vec![Step {
             call: Some(call.to_string()),
             with: step.with.clone(),
             session: step.session.clone(),
+            condition,
             ..blank_step()
         }]),
         (None, None, Some(body)) => Some(body.clone()),
@@ -246,6 +269,7 @@ fn blank_step() -> Step {
         as_binding: None,
         steps: None,
         for_each_body: Vec::new(),
+        groups: Vec::new(),
         flow: None,
         flow_secrets: Vec::new(),
         flow_cleanup: Vec::new(),
@@ -319,6 +343,11 @@ fn expand_sequence(
     let mut result = Expansion::default();
     for (inner_index, mut step) in steps.into_iter().enumerate() {
         rewrite_value(&mut step.with, &result.projections);
+        if let Some(invocation) = current_invocation {
+            for group in &mut step.groups {
+                group.invocation = Some(invocation.to_string());
+            }
+        }
         if step.call.is_none() || step.for_each.is_some() {
             if !namespace.is_empty()
                 && let Some(id) = &mut step.id
@@ -389,7 +418,36 @@ fn expand_sequence(
             counter,
         );
         for inner in &mut expanded.steps {
-            inner.condition = step.condition.clone();
+            if inner.groups.is_empty() {
+                inner.condition = step.condition.clone();
+            } else if !step.condition.is_default() {
+                if matches!(
+                    step.condition,
+                    StepCondition::Always | StepCondition::Failure
+                ) {
+                    if inner.condition.is_default() {
+                        inner.condition = step.condition.clone();
+                    }
+                    for group in &mut inner.groups {
+                        if group.condition.is_default() {
+                            group.condition = step.condition.clone();
+                        }
+                    }
+                }
+                // An explicit call condition still gates grouped actions.
+                // The group retains its own condition and child defaults.
+                inner.groups.insert(
+                    0,
+                    crate::StepGroup {
+                        label: String::new(),
+                        condition: step.condition.clone(),
+                        key: usize::MAX,
+                        invocation: Some(invocation.clone()),
+                        location: None,
+                    },
+                );
+            }
+            inner.groups.splice(..0, step.groups.iter().cloned());
         }
 
         let mut direct_ids = BTreeMap::new();
@@ -562,6 +620,16 @@ fn carry_cleanup_into_loop(step: &mut Step) {
 
 fn substitute_step_params(step: &mut Step, bindings: &BTreeMap<String, serde_yml::Value>) {
     substitute_params(&mut step.with, bindings);
+    for group in &mut step.groups {
+        if let StepCondition::Expr(expr) = &mut group.condition {
+            let mut raw = serde_yml::Value::String(expr.raw.clone());
+            substitute_params(&mut raw, bindings);
+            if let Some(raw) = raw.as_str() {
+                *expr = crate::ExprStr::from_source(raw)
+                    .expect("flow parameter substitution preserves condition syntax");
+            }
+        }
+    }
     if let Some(expr) = &mut step.for_each {
         let mut value = serde_yml::Value::String(expr.raw.clone());
         substitute_params(&mut value, bindings);
@@ -714,6 +782,12 @@ fn render_expr_value(value: &serde_yml::Value) -> Option<String> {
 fn rewrite_steps(steps: &mut [Step], projections: &BTreeMap<String, String>) {
     for step in steps {
         rewrite_value(&mut step.with, projections);
+        for group in &mut step.groups {
+            if let StepCondition::Expr(expr) = &mut group.condition {
+                *expr = crate::ExprStr::from_source(&rewrite_string(&expr.raw, projections))
+                    .expect("projection preserves group condition syntax");
+            }
+        }
         if let StepCondition::Expr(condition) = &mut step.condition {
             *condition = crate::ExprStr::from_source(&rewrite_string(&condition.raw, projections))
                 .expect("rewriting a valid step reference preserves expression syntax");

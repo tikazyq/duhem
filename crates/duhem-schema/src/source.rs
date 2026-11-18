@@ -72,6 +72,27 @@ impl PartialEq for SourceMap {
 }
 
 impl SourceMap {
+    pub(crate) fn clear_step_nodes(&mut self, prefix: &[SourcePathSegment]) {
+        self.nodes
+            .retain(|path, _| !path.starts_with(prefix) || path.as_slice() == prefix);
+    }
+
+    pub(crate) fn copy_step_nodes(
+        &mut self,
+        source: &Self,
+        from: &[SourcePathSegment],
+        to: &[SourcePathSegment],
+    ) {
+        for (path, node) in source.nodes.range(from.to_vec()..) {
+            let Some(tail) = path.strip_prefix(from) else {
+                break;
+            };
+            let mut path = to.to_vec();
+            path.extend_from_slice(tail);
+            self.nodes.insert(path, node.clone());
+        }
+    }
+
     /// Location of a check step's authored `with:` mapping.
     #[doc(hidden)]
     pub fn check_step_with_location(

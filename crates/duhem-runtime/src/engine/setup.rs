@@ -27,6 +27,7 @@ use duhem_schema::Step;
 
 use crate::engine::context::RunState;
 use crate::engine::for_each::{process_lifecycle_step, run_for_each_step};
+use crate::engine::gating::GroupGates;
 use crate::engine::registry::ActionRegistry;
 use crate::engine::runner::{CleanupFailure, EngineError};
 
@@ -517,6 +518,7 @@ async fn run_lifecycle_steps(
     let mut failed_by = environment_failed.then(|| "setup environment".to_string());
     let mut stored_error = None;
     let mut cleanup = Vec::new();
+    let mut groups = GroupGates::default();
     let execution: Result<(), EngineError> = async {
         for (idx, step) in steps.iter().enumerate() {
             if step.for_each.is_some() {
@@ -536,6 +538,7 @@ async fn run_lifecycle_steps(
                     &mut failed_by,
                     &mut stored_error,
                     &mut cleanup,
+                    &mut groups,
                 )
                 .await?;
                 continue;
@@ -557,6 +560,7 @@ async fn run_lifecycle_steps(
                 &mut failed_by,
                 &mut stored_error,
                 &mut cleanup,
+                &mut groups,
             )
             .await?;
         }
@@ -700,6 +704,7 @@ mod tests {
             as_binding: None,
             steps: None,
             for_each_body: Vec::new(),
+            groups: Vec::new(),
             flow: None,
             flow_secrets: Vec::new(),
             flow_cleanup: Vec::new(),

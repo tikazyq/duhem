@@ -61,6 +61,8 @@ pub enum StepCondition {
     /// Run only while no earlier step in this sequence has failed.
     #[default]
     Success,
+    /// Explicit `if: success`, which overrides an enclosing group default.
+    ExplicitSuccess,
     /// Run regardless of an earlier step failure.
     Always,
     /// Run only after an earlier step failure.
@@ -72,7 +74,7 @@ pub enum StepCondition {
 impl Serialize for StepCondition {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Self::Success => serializer.serialize_str("success"),
+            Self::Success | Self::ExplicitSuccess => serializer.serialize_str("success"),
             Self::Always => serializer.serialize_str("always"),
             Self::Failure => serializer.serialize_str("failure"),
             Self::Expr(expr) => expr.serialize(serializer),
@@ -84,7 +86,7 @@ impl<'de> Deserialize<'de> for StepCondition {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
         match raw.as_str() {
-            "success" => Ok(Self::Success),
+            "success" => Ok(Self::ExplicitSuccess),
             "always" => Ok(Self::Always),
             "failure" => Ok(Self::Failure),
             // A bare word that is not one of the three gates is far more
@@ -132,16 +134,13 @@ pub struct Step {
     /// requested by checks, never by lifecycle steps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
-    /// Optional — required only when another assertion or step
-    /// references this step via `$steps.<id>.outputs.*`. The
-    /// validator enforces that an unreferenced step may omit `id`,
-    /// while a referenced step must declare one and that the id is
-    /// unique within its check.
+    /// Required for group labels and for steps referenced by
+    /// `$steps.<id>.outputs.*`. Group labels do not expose outputs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 
-    /// Bare name declared by the enclosing check. On a call, fills undeclared
-    /// browser selectors inside the expanded flow; explicit inner selectors win.
+    /// Bare name declared by the enclosing check. On a call or group, fills
+    /// undeclared browser selectors inside it; explicit inner selectors win.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
 
@@ -151,8 +150,8 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// Dispatch condition, serialized as `if:`. Omission is
-    /// byte-identical to `if: success`.
+    /// Dispatch condition, serialized as `if:`. Omission defaults to
+    /// `success` unless a group supplies a different default.
     #[serde(
         rename = "if",
         default,
@@ -160,9 +159,8 @@ pub struct Step {
     )]
     pub condition: StepCondition,
 
-    /// Action type identifier (e.g. `ui/click`). Exactly one of this
-    /// field and [`Step::call`] is required; the structural validator
-    /// owns the friendly exactly-one diagnostic.
+    /// Action type identifier (e.g. `ui/click`). Exactly one of `uses:`,
+    /// `call:`, or `steps:` is required.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uses: Option<String>,
 
@@ -222,13 +220,8 @@ pub struct Step {
     #[serde(rename = "as", default, skip_serializing_if = "Option::is_none")]
     pub as_binding: Option<String>,
 
-    /// Inline multi-step loop body — one of the three `for_each:` body
-    /// forms alongside `uses:` and `call:` (exactly one required).
-    /// Recursive in the type so `secret_outputs:`/`outputs:`/`if:`
-    /// etc. are never duplicated onto a separate loop-body type, but
-    /// capped at depth 1 by validation: a step inside this list may
-    /// not itself carry `for_each:` or `steps:`. Also rejected without
-    /// an enclosing `for_each:`.
+    /// Inline group or multi-step `for_each:` body. Mutually exclusive with
+    /// `uses:` and `call:`. A group requires an `id:` and a non-empty body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steps: Option<Vec<Step>>,
 
@@ -243,6 +236,11 @@ pub struct Step {
     #[serde(skip)]
     #[schemars(skip)]
     pub for_each_body: Vec<Step>,
+
+    /// Enclosing groups in entry order after loader expansion.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub groups: Vec<StepGroup>,
 
     /// Origin of an expanded action step. Not part of the authored VD
     /// schema; the runtime copies it into `StepStarted.flow`.
@@ -265,6 +263,17 @@ pub struct Step {
     #[serde(skip)]
     #[schemars(skip)]
     pub flow_cleanup: Vec<FlowCleanup>,
+}
+
+/// Loader metadata for an inline group. Its key distinguishes separate
+/// invocations of the same group template.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepGroup {
+    pub label: String,
+    pub condition: StepCondition,
+    pub(crate) key: usize,
+    pub(crate) invocation: Option<String>,
+    pub(crate) location: Option<crate::SourceLocation>,
 }
 
 impl Step {
@@ -332,7 +341,7 @@ with: { role: button, name: Create }
         assert_eq!(serde_yml::to_string(&step).expect("serialize"), old_shape);
 
         for (wire, expected) in [
-            ("success", StepCondition::Success),
+            ("success", StepCondition::ExplicitSuccess),
             ("always", StepCondition::Always),
             ("failure", StepCondition::Failure),
         ] {

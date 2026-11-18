@@ -90,6 +90,7 @@ impl Processes {
             append!(EventPayload::SetupStepStarted {
                 phase: StepPhase::Teardown,
                 step_index: 0,
+                group_path: None,
                 uses: "process/stop".into(),
                 layer: Some("runtime".into()),
                 with: std::collections::BTreeMap::from([

@@ -21,7 +21,14 @@ impl Engine {
             .iter()
             .flat_map(|s| {
                 if s.for_each.is_some() {
-                    s.for_each_body.clone()
+                    s.for_each_body
+                        .iter()
+                        .cloned()
+                        .map(|mut step| {
+                            step.groups.splice(..0, s.groups.iter().cloned());
+                            step
+                        })
+                        .collect()
                 } else {
                     vec![s.clone()]
                 }
@@ -39,6 +46,7 @@ impl Engine {
         let mut ordinal = 0u32;
         let mut ordinary = BTreeSet::new();
         let mut empty_loops = Vec::new();
+        let mut groups = GroupGates::default();
         for (wrapper_index, step) in authored.steps.iter().enumerate() {
             let control_index = check.assertions.len() + check.steps.len() + wrapper_index;
             let Some(source) = &step.for_each else {
@@ -57,6 +65,7 @@ impl Engine {
                     &mut cleanup,
                     &mut evidence,
                     &mut gated,
+                    &mut groups,
                 )
                 .await?;
                 offset += 1;
@@ -66,7 +75,32 @@ impl Engine {
             offset = range.end;
             // Resolve once in the outer context. Bounds are enforced before
             // dispatch, so excess rows are never silently truncated.
-            let gate = match evaluate_in_check(step, range.start, failed_by.as_deref(), ctx) {
+            let group_gate = groups
+                .enter(step, failed_by.as_deref(), ctx)
+                .map_err(|error| error.to_string());
+            if matches!(group_gate, Ok(Some(_))) {
+                self.execute_check_steps(
+                    writer,
+                    criterion_id,
+                    &check,
+                    ctx,
+                    contexts,
+                    range,
+                    None,
+                    environment_failed,
+                    &mut failed_by,
+                    &mut stored_error,
+                    &mut cleanup,
+                    &mut evidence,
+                    &mut gated,
+                    &mut groups.clone(),
+                )
+                .await?;
+                continue;
+            }
+            let gate = match group_gate
+                .and_then(|_| evaluate_in_check(step, range.start, failed_by.as_deref(), ctx))
+            {
                 Ok(gate) => gate,
                 Err(detail) => {
                     // #440 R2: an unresolvable loop condition makes the
@@ -104,7 +138,7 @@ impl Engine {
             };
             if gate.is_some() {
                 for idx in range {
-                    evidence[idx] = StepEvidence::skipped("loop gate".into());
+                    evidence[idx] = StepEvidence::skipped("loop gate".into(), false);
                     if self
                         .registry
                         .get(check.steps[idx].uses_name())
@@ -193,6 +227,7 @@ impl Engine {
                     &mut cleanup,
                     &mut evidence,
                     &mut gated,
+                    &mut groups.clone(),
                 )
                 .await?;
                 // Cleanups registered by this iteration keep its outputs and

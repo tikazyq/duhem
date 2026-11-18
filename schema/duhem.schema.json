@@ -680,7 +680,7 @@
           "description": "Bounded iteration over a runtime-produced array (#443 / #521). Available in lifecycle blocks and check steps. Check assertions evaluate once per iteration against that iteration's outputs. The source is read once; `max:` is mandatory and exceeding it fails rather than silently truncating the source."
         },
         "id": {
-          "description": "Optional — required only when another assertion or step references this step via `$steps.<id>.outputs.*`. The validator enforces that an unreferenced step may omit `id`, while a referenced step must declare one and that the id is unique within its check.",
+          "description": "Required for group labels and for steps referenced by `$steps.<id>.outputs.*`. Group labels do not expose outputs.",
           "type": [
             "string",
             "null"
@@ -688,7 +688,7 @@
         },
         "if": {
           "$ref": "#/definitions/StepCondition",
-          "description": "Dispatch condition, serialized as `if:`. Omission is byte-identical to `if: success`."
+          "description": "Dispatch condition, serialized as `if:`. Omission defaults to `success` unless a group supplies a different default."
         },
         "max": {
           "description": "Mandatory iteration ceiling for `for_each:`. Required by #444's totality commitment: the worst-case step count must be computable from the Verification Definition alone, and `max × len(body)` is what makes that possible. Meaningless (and rejected by the validator) without `for_each:`.",
@@ -721,14 +721,14 @@
           "type": "array"
         },
         "session": {
-          "description": "Bare name declared by the enclosing check. On a call, fills undeclared browser selectors inside the expanded flow; explicit inner selectors win.",
+          "description": "Bare name declared by the enclosing check. On a call or group, fills undeclared browser selectors inside it; explicit inner selectors win.",
           "type": [
             "string",
             "null"
           ]
         },
         "steps": {
-          "description": "Inline multi-step loop body — one of the three `for_each:` body forms alongside `uses:` and `call:` (exactly one required). Recursive in the type so `secret_outputs:`/`outputs:`/`if:` etc. are never duplicated onto a separate loop-body type, but capped at depth 1 by validation: a step inside this list may not itself carry `for_each:` or `steps:`. Also rejected without an enclosing `for_each:`.",
+          "description": "Inline group or multi-step `for_each:` body. Mutually exclusive with `uses:` and `call:`. A group requires an `id:` and a non-empty body.",
           "items": {
             "$ref": "#/definitions/Step"
           },
@@ -738,7 +738,7 @@
           ]
         },
         "uses": {
-          "description": "Action type identifier (e.g. `ui/click`). Exactly one of this field and [`Step::call`] is required; the structural validator owns the friendly exactly-one diagnostic.",
+          "description": "Action type identifier (e.g. `ui/click`). Exactly one of `uses:`, `call:`, or `steps:` is required.",
           "type": [
             "string",
             "null"

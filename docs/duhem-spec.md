@@ -832,12 +832,56 @@ steps:
     with: { method: DELETE, url: $inputs.lease_url }
 ```
 
+**Inline step groups (#663).** Give a step an `id:` and a non-empty
+`steps:` list to group actions in a check, lifecycle block, or loop body.
+A group may have `description:`, `if:`, and `session:`. Its `if:` runs
+once on entry. When it is false or blocked by an earlier failure, every
+leaf is recorded as skipped with a cause naming the group. A false
+value condition counts any skipped judging actions in the check's gated
+claim count. An unresolvable condition follows the same error policy as
+a plain step's condition.
+
+The enclosing sequence and its groups share failure state and step ids.
+A leaf inside a group can be referenced by its original id, and a group
+id is a label only. An enclosing `if: always` or `if: failure` supplies
+the default for steps that omit `if:`. Explicit conditions, including
+`if: success`, override that default. An enclosing `session:` supplies
+the default named browser context for `ui/*` steps without a selector.
+
+```yaml
+verification: Workspace sign-in
+criteria:
+  - id: AC-1
+    description: A signed-in user can see their workspace.
+    checks:
+      - id: AC-1.1
+        sessions: { operator: null }
+        steps:
+          - id: open_workspace
+            session: operator
+            steps:
+              - uses: ui/navigate
+                with: { url: /workspace }
+              - uses: ui/assert-element
+                with: { locator: { role: heading, name: Workspace }, expected: visible }
+          - id: diagnostics
+            if: failure
+            steps:
+              - uses: cli/invoke
+                with: { command: ./scripts/collect-diagnostics.sh }
+```
+
+Group depth is bounded by `MAX_FLOW_DEPTH`. Group wrappers contribute
+zero to the step bound and have no evidence index. Step-start events
+retain the flat step index and carry an optional `group_path:` array of
+labels from outermost to innermost. Older traces omit the field.
+
 **A Verification Definition is total.** Every VD provably terminates,
 and the maximum number of steps a check can execute is computable from
 the Verification Definition alone, before the run. Validation rejects a
 definition whenever that bound cannot be computed; `duhem resolve`
-reports the per-check worst-case step count. Today the bound is the flat
-step count after flow expansion.
+reports the per-check worst-case step count. The bound is the sum of leaf steps after flow expansion, multiplied
+by the declared iteration ceiling for each loop body.
 
 This boundary forbids `while` and every other condition-driven form of
 repetition, recursion of any kind, unbounded iteration, unbounded
@@ -881,9 +925,9 @@ report having verified less than the Verification Definition budgeted
 for, the false-green shape §7.6 exists to prevent. An empty array is
 zero iterations, not an error. The loop body is exactly one of a
 single `uses:` action, a `call:` to a named flow, or an inline
-multi-step `steps:` list — never more than one, never nested (a body
-step may not itself carry `for_each:` or `steps:`, capping nesting at
-depth 1). `as: <name>` binds the current element for the body's
+multi-step `steps:` list. The body may contain inline groups. A
+`for_each:` inside another `for_each:` is rejected, including through
+a group or flow call. `as: <name>` binds the current element for the body's
 duration; `$<name>` is a validation error anywhere outside that body,
 and lifecycle body ids remain local to that body. In a check (#521),
 `assertions:` can reference its loop body's `$steps.<id>.outputs.*`:
@@ -914,7 +958,8 @@ retains the same mandatory bounds and depth-one limit.
 
 
 The outcome gate vocabulary remains `success | always | failure`, and
-omission remains identical to `if: success`. A gated step emits a
+omission defaults to `if: success` outside a group with an inherited
+default. A gated step emits a
 `StepOutcome::Skipped` evidence record with the causing step in its
 reason and contributes no implicit assertion. Explicit assertions are
 evaluated only after the step sequence and therefore cannot gate later

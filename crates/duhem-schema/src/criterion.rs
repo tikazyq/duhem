@@ -138,20 +138,26 @@ impl Check {
     /// Loaders expand reusable flows before validation, so each current step
     /// contributes one action, or max × expanded loop-body actions.
     pub fn worst_case_step_count(&self) -> Result<usize, StepCountError> {
-        self.steps.iter().try_fold(0usize, |bound, step| {
-            let count = if step.for_each.is_some() {
-                let max = step.max.ok_or(StepCountError::MissingMax)? as usize;
-                let body_len = if !step.for_each_body.is_empty() {
-                    step.for_each_body.len()
+        fn count(steps: &[Step]) -> Result<usize, StepCountError> {
+            steps.iter().try_fold(0usize, |bound, step| {
+                let leaves = if !step.for_each_body.is_empty() {
+                    count(&step.for_each_body)?
+                } else if let Some(body) = &step.steps {
+                    count(body)?
                 } else {
-                    step.steps.as_ref().map_or(1, Vec::len)
+                    1
                 };
-                max.checked_mul(body_len).ok_or(StepCountError::Overflow)?
-            } else {
-                1
-            };
-            bound.checked_add(count).ok_or(StepCountError::Overflow)
-        })
+                let times = if step.for_each.is_some() {
+                    step.max.ok_or(StepCountError::MissingMax)? as usize
+                } else {
+                    1
+                };
+                bound
+                    .checked_add(leaves.checked_mul(times).ok_or(StepCountError::Overflow)?)
+                    .ok_or(StepCountError::Overflow)
+            })
+        }
+        count(&self.steps)
     }
 }
 

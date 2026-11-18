@@ -94,6 +94,7 @@ async fn check_artifact_surfaces_secret_mask_occurrence_counts() {
             criterion_id: "AC-1".into(),
             check_id: "AC-1.1".into(),
             step_index: 0,
+            group_path: None,
             uses: "api/call".into(),
             layer: Some("api".into()),
             flow: None,
@@ -469,6 +470,7 @@ async fn run_detail_surfaces_teardown_evidence_without_changing_verdict() {
         .append(EventPayload::SetupStepStarted {
             phase: duhem_evidence::StepPhase::Teardown,
             step_index: 0,
+            group_path: None,
             uses: "api/call".into(),
             layer: Some("api".into()),
             with: BTreeMap::new(),
@@ -625,6 +627,7 @@ async fn cleanup_step_finish_is_keyed_by_criterion_scope() {
             .append(EventPayload::SetupStepStarted {
                 phase: duhem_evidence::StepPhase::Teardown,
                 step_index: 0,
+                group_path: None,
                 uses: format!("cli/{criterion_id}"),
                 layer: None,
                 with: BTreeMap::new(),
@@ -1159,6 +1162,7 @@ async fn colliding_check_ids_attribute_to_the_first_owner() {
             criterion_id: criterion.into(),
             check_id: "DUP".into(),
             step_index: 0,
+            group_path: None,
             uses: "api/call".into(),
             layer: None,
             flow: None,

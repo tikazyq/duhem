@@ -143,21 +143,34 @@ pub(super) fn validate_check(
     // precede the conditioned step, so a forward or self reference
     // resolves like an undeclared step. Same resolver as assertions.
     let mut earlier_outputs: HashMap<&str, HashSet<String>> = HashMap::new();
+    let mut seen_groups = HashSet::new();
     for (idx, &(s, active_loop)) in check_steps.iter().enumerate() {
-        if let StepCondition::Expr(expr) = &s.condition {
+        let group_conditions = s
+            .groups
+            .iter()
+            .filter(|group| seen_groups.insert((group.key, group.invocation.as_deref())))
+            .map(|group| (&group.condition, Some(group)));
+        for (condition, group) in group_conditions.chain(std::iter::once((&s.condition, None))) {
+            let StepCondition::Expr(expr) = condition else {
+                continue;
+            };
             let mut path = crate::source::check_path(criterion_index, check_index, "steps");
             path.push(SourcePathSegment::index(idx));
             path.push(SourcePathSegment::key("if"));
-            let location = source_context_matches
-                .then(|| source_map.scalar_location(&path, &expr.raw))
-                .flatten();
+            let location = group.and_then(|group| group.location).or_else(|| {
+                source_context_matches
+                    .then(|| source_map.scalar_location(&path, &expr.raw))
+                    .flatten()
+            });
             let condition_scope = PathScope {
                 step_outputs: &earlier_outputs,
                 active_loop,
                 ..scope
             };
             let site = RefSite::StepCondition {
-                step: step_label(s, idx),
+                step: group
+                    .filter(|group| !group.label.is_empty())
+                    .map_or_else(|| step_label(s, idx), |group| group.label.clone()),
             };
             walk_checkable_paths(&expr.parsed, &mut |p, arity| {
                 check_path(&condition_scope, p, arity, &expr.raw, &site, location, errs);

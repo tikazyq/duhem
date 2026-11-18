@@ -137,6 +137,7 @@ async fn export_refuses_traversal_shaped_ids() {
         criterion_id: "../../escape".into(),
         check_id: "../pwn".into(),
         step_index: 0,
+        group_path: None,
         uses: "api/call".into(),
         layer: None,
         flow: None,

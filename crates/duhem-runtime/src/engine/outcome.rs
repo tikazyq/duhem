@@ -109,6 +109,7 @@ pub(crate) struct StepEvidence {
     /// assertion verdict; this distinguishes it from an unrun step
     /// whose observation is genuinely missing.
     pub skip_reason: Option<String>,
+    pub value_gated: bool,
     /// Authored catalog coordinate, retained after the map is spliced
     /// so a failure points back to the one shared entry to edit.
     pub catalog_reference: Option<String>,
@@ -129,17 +130,19 @@ impl StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             skip_reason: None,
+            value_gated: false,
             catalog_reference: None,
             outcome: None,
             detail: None,
         }
     }
 
-    pub fn skipped(reason: String) -> Self {
+    pub fn skipped(reason: String, value_gated: bool) -> Self {
         StepEvidence {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::new(),
             skip_reason: Some(reason),
+            value_gated,
             catalog_reference: None,
             outcome: None,
             detail: None,
@@ -563,10 +566,14 @@ fn skipped_reference_reason(
         let id = step.id.as_ref()?;
         // A value-gated step's absent outputs must stay visible as a
         // missing observation, not vanish with the assertion (#440 R4).
-        if !refs.contains(id) || matches!(step.condition, duhem_schema::StepCondition::Expr(_)) {
+        let evidence = evidence.get(index)?;
+        if !refs.contains(id)
+            || matches!(step.condition, duhem_schema::StepCondition::Expr(_))
+            || evidence.value_gated
+        {
             return None;
         }
-        evidence.get(index)?.skip_reason.clone()
+        evidence.skip_reason.clone()
     })
 }
 
@@ -767,6 +774,7 @@ mod fail_detail_tests {
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect(),
             skip_reason: None,
+            value_gated: false,
             catalog_reference: None,
             outcome: Some(Outcome::Ok),
             detail: None,
@@ -974,6 +982,7 @@ mod step_label_tests {
             with: serde_yml::Value::Null,
             outputs: BTreeMap::from([("satisfied".to_string(), serde_json::json!(false))]),
             skip_reason: None,
+            value_gated: false,
             catalog_reference: None,
             outcome: Some(Outcome::Ok),
             detail: None,

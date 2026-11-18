@@ -54,6 +54,7 @@ async fn seed(store: Arc<SqliteStore>, run_id: &str, pass: bool, screenshot: boo
         criterion_id: "AC-1".into(),
         check_id: "AC-1.1".into(),
         step_index: 0,
+        group_path: None,
         uses: "ui/assert-element".into(),
         layer: Some("ui".into()),
         flow: None,

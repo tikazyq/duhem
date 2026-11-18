@@ -350,6 +350,27 @@ entries win over the composed manifest. A locator may contain
 Validate dangling references offline; use `duhem resolve --provenance`
 to inspect the effective catalog and each winning source file.
 
+#### Give a local sequence a name
+
+Use `id:` and `steps:` to group a sequence inside a check, a lifecycle
+block, or a `for_each:` body. Keep the leaf ids unique in the enclosing
+sequence. Reference leaf outputs as usual. Group ids only label evidence.
+
+```yaml
+- id: diagnostics
+  if: failure
+  steps:
+    - uses: cli/invoke
+      with: { command: ./scripts/collect-diagnostics.sh }
+```
+
+The group's `if:` runs once. If it gates the group, every leaf is
+recorded as skipped with the group's label. `if: always` and
+`if: failure` are also defaults for inner steps that omit `if:`. Use an
+explicit `if: success` to require a clean gate for a child. A group can
+set `session: <name>` for browser steps that omit a selector. Group
+wrappers have no `uses:`, `call:`, `with:`, or outputs of their own.
+
 #### Share step flows instead of copying sequences
 
 Put a repeated action sequence in a `flows:` catalog on the root
@@ -585,7 +606,7 @@ setup outputs, and check seeds may also reference criterion setup outputs.
 A scope cannot seed itself from its own setup outputs.
 
 With check `sessions:`, each block opens fresh contexts for the named entries.
-Select a name on each browser step, or put `session: <name>` on a `call:`:
+Select a name on each browser step, or put `session: <name>` on a group or `call:`.
 undeclared inner browser selectors inherit it; explicit inner selectors win.
 Call selectors require a named-sessions check. `defaults.max_sessions` caps
 simultaneously open contexts per check (default 4).
