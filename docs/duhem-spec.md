@@ -1674,7 +1674,7 @@ Linux/macOS use owned process groups; unsupported platforms reject before spawn.
 - **Surfaces touched:** action-type catalog, runtime action context, evidence outputs.
 - **Fields added/renamed/removed:** optional `api/observe.with.window` with `from_step`, `edge`, `duration`; outputs `count`, `requests`, `window`, `complete`, `truncated`. Existing response outputs remain declared and legacy invocation semantics stay unchanged.
 - **Migration:** none; collection is opt-in. [Authoring guidance](request-window-authoring.md) and a [worked Verification Definition](../crates/duhem-actions/tests/fixtures/api-observe-window.yml) describe the contract.
-- **CHANGELOG.md entry:** `- [additive] api/observe accepts step-anchored collection windows with ordered request, pending, redirect and abort evidence, bounded collections and secret masking. (#603) (#663)`
+- **CHANGELOG.md entry:** `- [additive] api/observe accepts step-anchored collection windows with ordered request, pending, redirect and abort evidence, bounded collections and secret masking. (#603, #663)`
 - **Alignment:** preserves holistic browser verification, deterministic judgment, stable criteria and the independent evidence boundary. No identity commitment changes.
 
 #### Planned (Phase 2+ — §14)
