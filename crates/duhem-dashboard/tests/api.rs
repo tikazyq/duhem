@@ -10,7 +10,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use duhem_dashboard::{EvidenceReader, events_to_jsonl, router};
 use duhem_evidence::{
-    EventPayload, EvidenceWriter, ObservationValue, RunLineage, RunOrigin, RunScope,
+    EventPayload, EvidenceWriter, ObservationValue, RunBundle, RunLineage, RunOrigin, RunScope,
     SecretRegistry, Store, Trace, VerdictState, replay, run_started_with_definition,
     run_started_with_definition_and_lineage, run_started_with_viewport,
 };
@@ -695,7 +695,8 @@ async fn leaf_setup_abort_is_not_overwritten_by_scoped_setup_completion() {
         .unwrap();
     writer
         .append(EventPayload::RunAborted {
-            signal: "leaf setup failed".into(),
+            signal: "SIGTERM".into(),
+            error: None,
         })
         .await
         .unwrap();
@@ -703,6 +704,57 @@ async fn leaf_setup_abort_is_not_overwritten_by_scoped_setup_completion() {
 
     let (_, json) = get_json(EvidenceReader::new(ro), &format!("/api/runs/{run_id}")).await;
     assert_eq!(json["setup_aborted"], true);
+}
+
+#[tokio::test]
+async fn ingest_replays_completed_judgments_and_exposes_the_abort_error() {
+    let (_source_tmp, source, _) = common::open_stores().await;
+    let (_target_tmp, target, ro) = common::open_stores().await;
+    let run_id = "01J000000000000000000000AC";
+    common::write_passing_run(source.clone(), run_id, "verifications/case.yml").await;
+    let mut bundle = RunBundle::from_store(source.as_ref(), run_id)
+        .await
+        .unwrap();
+    bundle.run.verdict = None;
+    let error = "step `cleanup`: unresolved reference `$steps.gated.outputs.value` in `with:`";
+    bundle.events.last_mut().unwrap().payload = EventPayload::RunAborted {
+        signal: String::new(),
+        error: Some(error.into()),
+    };
+
+    let app = duhem_dashboard::ingest::ingest_router(target.clone(), None);
+    let post = |bundle: &RunBundle| {
+        Request::post("/api/ingest")
+            .header("content-type", "application/json")
+            .header("x-duhem-bundle-version", "1")
+            .header("x-duhem-content-hash", bundle.content_hash().unwrap())
+            .body(Body::from(bundle.wire_bytes().unwrap()))
+            .unwrap()
+    };
+    let mut tampered = bundle.clone();
+    let verdict = tampered
+        .events
+        .iter_mut()
+        .find_map(|evt| match &mut evt.payload {
+            EventPayload::CheckFinished { verdict, .. } => Some(verdict),
+            _ => None,
+        })
+        .unwrap();
+    *verdict = VerdictState::Fail;
+    let rejected = app.clone().oneshot(post(&tampered)).await.unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    let body = rejected.into_body().collect().await.unwrap().to_bytes();
+    assert!(String::from_utf8_lossy(&body).contains("recorded verdict fail, recomputed pass"));
+    assert!(target.get_run(run_id).await.unwrap().is_none());
+
+    let accepted = app.oneshot(post(&bundle)).await.unwrap();
+    assert_eq!(accepted.status(), StatusCode::NO_CONTENT);
+    let (status, json) = get_json(EvidenceReader::new(ro), &format!("/api/runs/{run_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["status"], "aborted");
+    assert_eq!(json["verdict"], Value::Null);
+    assert_eq!(json["abort_error"], error);
+    assert_eq!(json["criteria"][0]["checks"][0]["verdict"], "pass");
 }
 
 #[tokio::test]

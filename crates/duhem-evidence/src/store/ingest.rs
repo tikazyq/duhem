@@ -75,16 +75,16 @@ impl SqliteStore {
         {
             return Err(invalid("incomplete run"));
         }
-        let judged = trace.events().iter().any(|event| {
-            matches!(
-                event.payload,
-                EventPayload::RunFinished {
-                    verdict: Some(_),
-                    ..
-                }
-            )
-        });
-        if judged {
+        let terminal = terminals.first().map(|(_, event)| &event.payload);
+        if matches!(terminal, Some(EventPayload::RunAborted { .. })) {
+            crate::replay_aborted(&trace).map_err(invalid)?;
+        } else if matches!(
+            terminal,
+            Some(EventPayload::RunFinished {
+                verdict: Some(_),
+                ..
+            })
+        ) {
             // Replay recomputes check, criterion and run verdicts and rejects divergence.
             crate::replay(&trace).map_err(invalid)?;
         } else if trace

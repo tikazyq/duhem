@@ -648,6 +648,7 @@ mod tests {
         writer
             .append(EventPayload::RunAborted {
                 signal: secret.to_string(),
+                error: Some(format!("failed with {secret}")),
             })
             .await
             .unwrap();
@@ -666,8 +667,9 @@ mod tests {
             assert!(events.iter().any(|event| {
                 matches!(
                     &event.payload,
-                    EventPayload::RunAborted { signal }
+                    EventPayload::RunAborted { signal, error: Some(error) }
                         if signal == "[redacted:abort_signal]"
+                            && error == "failed with [redacted:abort_signal]"
                 )
             }));
             assert!(events.iter().any(|event| {

@@ -129,6 +129,7 @@ export interface RunDetail {
   check_totals?: RunCheckTotals;
   claim_scope?: ClaimScope;
   body_verdict?: Verdict;
+  abort_error?: string;
   run_id: string;
   verification: string;
   started_at: string | null;

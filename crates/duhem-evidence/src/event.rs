@@ -515,10 +515,13 @@ pub enum EventPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         verdict: Option<VerdictState>,
     },
-    /// The runtime observed an operator termination signal and sealed
-    /// the run before exiting.
+    /// The runtime sealed the run without a verdict after an operator
+    /// termination signal or an engine error.
     RunAborted {
+        /// The operator signal, or an empty string for an engine error.
         signal: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
 }
 

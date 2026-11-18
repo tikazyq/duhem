@@ -890,6 +890,12 @@ export function RunScaffold({
           <RunTabs run={run} active={active} />
         </header>
 
+        {run.abort_error && (
+          <p className="my-4 whitespace-pre-wrap break-words border-l-2 border-fail bg-fail/5 px-4 py-3 text-sm">
+            {run.abort_error}
+          </p>
+        )}
+
         {active === "results" ? (
           run.criteria.length === 0 && (run.lifecycle?.length ?? 0) === 0 && (run.children?.length ?? 0) === 0 ? (
             <p className="py-6 text-sm text-muted-foreground">

@@ -29,7 +29,7 @@ const RUN = {
   duration_ms: 1200,
   children: [],
   inputs: {},
-  verdict: "fail",
+  verdict: "fail" as string | null,
   status: "finished",
   setup_aborted: false,
   has_definition: true,
@@ -153,6 +153,15 @@ function LocationProbe() {
 }
 
 describe("run report tree", () => {
+  it("shows an aborted run's engine error", async () => {
+    const error = "step `cleanup`: unresolved reference";
+    const aborted = { ...RUN, status: "aborted", verdict: null, abort_error: error };
+    stub(aborted);
+    renderAt("/run/R1/results");
+    expect(await screen.findByText(error)).toBeTruthy();
+    expect(screen.getByText("Aborted", { exact: true })).toBeTruthy();
+  });
+
   it("shows recorded branch, PR and CI link in the run header", async () => {
     stub({
       ...RUN,

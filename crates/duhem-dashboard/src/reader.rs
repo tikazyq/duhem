@@ -599,6 +599,7 @@ fn lineage_entry(
 fn build_run_detail(run: &RunEvidence) -> RunDetail {
     let mut inputs = serde_json::Map::new();
     let mut setup_aborted = false;
+    let mut abort_error = None;
     let mut has_definition = false;
     let mut cleanup = Vec::new();
     let mut criterion_order: Vec<String> = Vec::new();
@@ -782,6 +783,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
                 run_verdict = *verdict;
                 body_verdict = *body;
             }
+            EventPayload::RunAborted { error, .. } => abort_error = error.clone(),
             _ => {}
         }
     }
@@ -822,6 +824,7 @@ fn build_run_detail(run: &RunEvidence) -> RunDetail {
         inputs,
         verdict: run_verdict,
         status: run.record.status,
+        abort_error,
         setup_aborted,
         has_definition,
         viewport,

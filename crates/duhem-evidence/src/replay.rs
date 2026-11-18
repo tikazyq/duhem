@@ -30,6 +30,8 @@ pub enum ReplayError {
     MissingRunStarted,
     #[error("trace missing run_finished event")]
     MissingRunFinished,
+    #[error("trace missing final run_aborted event")]
+    MissingRunAborted,
     #[error("{0}")]
     Divergence(#[from] ReplayDivergence),
     #[error("event ordering violated: {0}")]
@@ -73,7 +75,33 @@ pub struct ReplayedRun {
 
 /// Re-aggregate the recorded outcomes and assert reproducibility.
 pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
+    replay_inner(trace, false)?.ok_or(ReplayError::MissingRunFinished)
+}
+
+/// Recompute every completed check and criterion in a sealed abort trace.
+/// Unfinished scopes are allowed and there is no run verdict to replay.
+pub fn replay_aborted(trace: &Trace) -> Result<(), ReplayError> {
+    replay_inner(trace, true).map(|_| ())
+}
+
+fn replay_inner(trace: &Trace, aborted: bool) -> Result<Option<ReplayedRun>, ReplayError> {
     let events = trace.events();
+    if !matches!(
+        events.first().map(|e| &e.payload),
+        Some(EventPayload::RunStarted { .. })
+    ) {
+        return Err(ReplayError::MissingRunStarted);
+    }
+    let (recorded_run, recorded_body) = match events.last().map(|e| &e.payload) {
+        Some(EventPayload::RunAborted { .. }) if aborted => (None, None),
+        Some(EventPayload::RunFinished {
+            verdict: Some(verdict),
+            body_verdict,
+        }) if !aborted => (Some(*verdict), *body_verdict),
+        _ if aborted => return Err(ReplayError::MissingRunAborted),
+        _ => return Err(ReplayError::MissingRunFinished),
+    };
+    let events = &events[..events.len() - 1];
 
     // Per-check assertion outcomes (in trace order — first-cause-wins
     // for `Inconclusive` matches the judge's fold), recorded
@@ -85,8 +113,6 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
     // Preserve criterion order from `criterion_finished` events so the
     // recomputed `RunVerdict.criteria` matches the recorded ordering.
     let mut criterion_order: Vec<String> = Vec::new();
-    let mut recorded_run: Option<VerdictState> = None;
-    let mut recorded_body = None;
     let mut required_cleanup = std::collections::BTreeSet::new();
     let mut cleanup_failed = false;
     let mut native_outcomes = Vec::new();
@@ -167,7 +193,11 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 {
                     check_to_criterion.insert(check_id.clone(), criterion_id.clone());
                 }
-                recorded_checks.insert(check_id.clone(), *verdict);
+                if recorded_checks.insert(check_id.clone(), *verdict).is_some() {
+                    return Err(ReplayError::OutOfOrder(format!(
+                        "more than one check_finished for {check_id}"
+                    )));
+                }
                 if !assertions_by_check.contains_key(check_id)
                     && let Some(state) = process_setup.failed_for(criterion_id.as_deref(), check_id)
                 {
@@ -186,17 +216,20 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
                 criterion_id,
                 verdict,
             } => {
-                if !recorded_criteria.contains_key(criterion_id) {
-                    criterion_order.push(criterion_id.clone());
+                if recorded_criteria
+                    .insert(criterion_id.clone(), *verdict)
+                    .is_some()
+                {
+                    return Err(ReplayError::OutOfOrder(format!(
+                        "more than one criterion_finished for {criterion_id}"
+                    )));
                 }
-                recorded_criteria.insert(criterion_id.clone(), *verdict);
+                criterion_order.push(criterion_id.clone());
             }
-            EventPayload::RunFinished {
-                verdict,
-                body_verdict,
-            } => {
-                recorded_run = *verdict;
-                recorded_body = *body_verdict;
+            EventPayload::RunFinished { .. } | EventPayload::RunAborted { .. } => {
+                return Err(ReplayError::OutOfOrder(
+                    "terminal event before end of trace".into(),
+                ));
             }
             EventPayload::SetupStarted {
                 phase: crate::StepPhase::Teardown,
@@ -236,7 +269,6 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
             | EventPayload::ProcessObserved { .. }
             | EventPayload::RunHeartbeat
             | EventPayload::ClaimScopeDeclared { .. }
-            | EventPayload::RunAborted { .. }
             | EventPayload::StepFinished { .. }
             | EventPayload::SetupStarted { .. }
             | EventPayload::SetupStepStarted { .. }
@@ -259,25 +291,27 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
         }
     }
 
-    if !saw_run_started {
-        return Err(ReplayError::MissingRunStarted);
-    }
-    let recorded_run = recorded_run.ok_or(ReplayError::MissingRunFinished)?;
-
-    // Trace completeness: every check whose assertions were observed
-    // must have a `check_finished`, and every criterion that owns an
-    // observed check must have a `criterion_finished`. Without this
-    // check, an incomplete trace could replay as "matching" simply
-    // because the orphan assertions never got folded in.
-    for check_id in assertions_by_check.keys() {
-        if !recorded_checks.contains_key(check_id) {
-            return Err(ReplayError::OutOfOrder(format!(
-                "assertions recorded for check {check_id} but no check_finished"
-            )));
+    // An abort can leave part of the trace open. A completed criterion
+    // still needs every observed check it owns to be complete.
+    if !aborted {
+        for check_id in assertions_by_check.keys() {
+            if !recorded_checks.contains_key(check_id) {
+                return Err(ReplayError::OutOfOrder(format!(
+                    "assertions recorded for check {check_id} but no check_finished"
+                )));
+            }
         }
     }
-    for criterion_id in check_to_criterion.values() {
-        if !recorded_criteria.contains_key(criterion_id) {
+    for (check_id, criterion_id) in &check_to_criterion {
+        if aborted {
+            if recorded_criteria.contains_key(criterion_id)
+                && !recorded_checks.contains_key(check_id)
+            {
+                return Err(ReplayError::OutOfOrder(format!(
+                    "criterion {criterion_id} finished with unfinished check {check_id}"
+                )));
+            }
+        } else if !recorded_criteria.contains_key(criterion_id) {
             return Err(ReplayError::OutOfOrder(format!(
                 "checks observed under criterion {criterion_id} but no criterion_finished"
             )));
@@ -343,6 +377,10 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
         });
     }
 
+    let Some(recorded_run) = recorded_run else {
+        return Ok(None);
+    };
+
     // Recompute the run verdict.
     let mut run = aggregate_run(recomputed_criteria);
     if run.criteria.is_empty() && trace.events().iter().any(|event| matches!(
@@ -373,5 +411,5 @@ pub fn replay(trace: &Trace) -> Result<ReplayedRun, ReplayError> {
         .into());
     }
 
-    Ok(ReplayedRun { run })
+    Ok(Some(ReplayedRun { run }))
 }

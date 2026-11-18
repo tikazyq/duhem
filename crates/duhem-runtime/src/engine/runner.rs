@@ -667,25 +667,29 @@ impl Engine {
             result = &mut execution => Ok(result),
         };
         // Release the execution future's mutable borrow of the writer
-        // before appending a signal-driven terminal marker.
+        // before appending an abort marker.
         drop(execution);
         match completed {
-            Ok(result) => {
-                // Error paths may leave a partially entered scope. They still
-                // own their process groups even when evidence cannot be sealed.
-                if result.is_err() {
-                    self.drain_interrupted_processes(&mut writer, &mut run_state)
-                        .await;
-                }
-                let result = result.map(|mut outcome| {
-                    // Use the writer's live registry: it includes
-                    // credentials acquired after Engine's input-only
-                    // registry was cloned.
-                    masking::mask_run_outcome(&writer, &mut outcome);
-                    outcome
-                });
+            Ok(Ok(mut outcome)) => {
+                // Use the writer's live registry, which includes secrets acquired during the run.
+                masking::mask_run_outcome(&writer, &mut outcome);
                 writer.finish().await?;
-                result
+                Ok(outcome)
+            }
+            Ok(Err(error)) => {
+                self.drain_interrupted_processes(&mut writer, &mut run_state)
+                    .await;
+                if let Err(write_error) = writer
+                    .append(EventPayload::RunAborted {
+                        signal: String::new(),
+                        error: Some(error.to_string()),
+                    })
+                    .await
+                {
+                    tracing::warn!(error = %writer.mask_text(&write_error.to_string()), "could not seal aborted run");
+                }
+                writer.finish().await?;
+                Err(error)
             }
             Err(signal) => {
                 self.drain_interrupted_processes(&mut writer, &mut run_state)
@@ -693,6 +697,7 @@ impl Engine {
                 writer
                     .append(EventPayload::RunAborted {
                         signal: signal.to_string(),
+                        error: None,
                     })
                     .await?;
                 writer.finish().await?;
@@ -990,7 +995,7 @@ criteria:
                 .unwrap();
             assert!(matches!(
                 events.last().map(|event| &event.payload),
-                Some(EventPayload::RunAborted { signal }) if signal == "SIGTERM"
+                Some(EventPayload::RunAborted { signal, error: None }) if signal == "SIGTERM"
             ));
             return;
         }
@@ -1890,6 +1895,8 @@ criteria:
         engine.register_test_action(Box::new(StubAction::new("fake/teardown", Outcome::Ok)));
         let v = def(r#"
 verification: teardown after abort
+inputs:
+  api_token: { type: string, secret: true }
 setup:
   - id: prepared
     uses: fake/setup
@@ -1906,18 +1913,43 @@ criteria:
     checks:
       - id: AC-1.1
         steps:
-          - id: original
+          - id: original-error-token
             uses: fake/check
             with: { value: $steps.never.outputs.value }
         assertions: ["true"]
 "#);
-        let error = engine.run(&v, BTreeMap::new()).await.unwrap_err();
+        let secret = "original-error-token";
+        let error = engine
+            .run(
+                &v,
+                BTreeMap::from([("api_token".into(), serde_json::json!(secret))]),
+            )
+            .await
+            .unwrap_err();
         assert!(matches!(
             &error,
             EngineError::UnresolvedReference { reference, step, .. }
-                if reference == "$steps.never.outputs.value" && step == "original"
+                if reference == "$steps.never.outputs.value" && step == secret
         ));
         let events = read_only_run_events(&engine).await;
+        let (terminal, body) = events.split_last().unwrap();
+        assert!(matches!(
+            &terminal.payload,
+            EventPayload::RunAborted { signal, error: Some(message) }
+                if signal.is_empty() && *message == error.to_string().replace(secret, "[redacted:api_token]")
+        ));
+        assert!(!body.iter().any(|event| matches!(
+            event.payload,
+            EventPayload::RunFinished { .. } | EventPayload::RunAborted { .. }
+        )));
+        let store = engine.store.as_ref().unwrap();
+        let runs = store.list_runs().await.unwrap();
+        assert_eq!(runs[0].status, duhem_evidence::RunStatus::Aborted);
+        assert_eq!(runs[0].verdict, None);
+        duhem_evidence::replay_aborted(
+            &duhem_evidence::Trace::from_events(events.clone()).unwrap(),
+        )
+        .unwrap();
         assert!(events.iter().any(|event| matches!(
             &event.payload,
             EventPayload::SetupStepFinished {

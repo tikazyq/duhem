@@ -47,6 +47,18 @@ describe("foldRun", () => {
     expect(done.verdict).toBeNull();
   });
 
+  it("keeps completed judgments and the engine error when a run aborts", () => {
+    const error = "step `cleanup`: unresolved reference";
+    const aborted = foldRun("r1", [
+      ...trace.slice(0, -1),
+      { seq: 6, ts: "2026-06-10T10:00:06.000Z", kind: "run_aborted", error },
+    ]);
+    expect(aborted.status).toBe("aborted");
+    expect(aborted.verdict).toBeNull();
+    expect(aborted.abort_error).toBe(error);
+    expect(aborted.criteria[0].checks[0].verdict).toBe("pass");
+  });
+
   it("flags an aborted setup", () => {
     const aborted = foldRun("r1", [
       trace[0],
