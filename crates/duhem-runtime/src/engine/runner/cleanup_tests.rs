@@ -102,8 +102,12 @@ struct CleanupRetryAction {
 impl Dispatch for CleanupRetryAction {
     fn uses(&self) -> &'static str { self.name }
     fn requires_page(&self) -> bool { false }
-    async fn invoke(&self, _page: Option<&Page>, _index: usize, _with: &serde_yml::Value,
-        _env: &BTreeMap<String, String>) -> Result<ActionResult, ActionError> {
+    async fn invoke(
+        &self,
+        _ctx: &ActionCtx<'_>,
+        _with: &serde_yml::Value,
+        _env: &BTreeMap<String, String>,
+    ) -> Result<ActionResult, ActionError> {
         let first = self.calls.fetch_add(1, Ordering::SeqCst) == 0;
         Ok(if first && self.cleanup { ActionResult::error() }
             else if first { ActionResult::timeout() } else { ActionResult::ok() })

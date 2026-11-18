@@ -18,8 +18,7 @@ impl Dispatch for TagAction {
     }
     async fn invoke(
         &self,
-        _page: Option<&Page>,
-        _index: usize,
+        _ctx: &ActionCtx<'_>,
         with: &serde_yml::Value,
         _env: &BTreeMap<String, String>,
     ) -> Result<ActionResult, ActionError> {

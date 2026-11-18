@@ -56,7 +56,7 @@ impl Scope<'_> {
                     path
                 }
             };
-            if step.uses_name() == "api/observe"
+            if step.uses.as_deref() == Some("api/observe")
                 && let Some(window) = step.with.get("window").filter(|value| !value.is_null())
             {
                 self.window(window, &path, preceding, errors);
